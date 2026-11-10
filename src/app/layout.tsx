@@ -1,33 +1,29 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import type { Metadata } from 'next'
+import './globals.css'
+import '@/components/sites/facai8/facai8.css'
+import '@/components/sites/facai8/iconfont.css'
+import { ToastHost } from '@/components/sites/facai8/Toast'
+import { SITE_INFO } from '@/lib/facai8/data/site-info'
 
 export const metadata: Metadata = {
-  title: "Website Clone",
-  description: "Pixel-perfect website clone",
-};
+  title: '彩搜搜',
+  description: SITE_INFO.siteDescription,
+  icons: {
+    icon: '/sites/facai8/images/15cdad5a02bb43e1a15e2e100517a332.png',
+  },
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.ReactNode
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="zh-CN">
+      <body>
+        {children}
+        <ToastHost />
+      </body>
     </html>
-  );
+  )
 }
