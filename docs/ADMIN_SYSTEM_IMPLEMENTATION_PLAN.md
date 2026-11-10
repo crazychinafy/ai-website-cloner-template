@@ -75,22 +75,32 @@
 
 ## P2：数据库 Schema、迁移和 Seed
 
+> **执行状态：已完成（2026-11-10），等待用户验收。** 要点：
+> 23 张表 → Drizzle schema（`src/lib/db/schema/` 14 模块 + 统一 index 出口）；1 个版本化迁移 `drizzle/0000_fair_magdalene.sql`（kit 0.31.11 生成 + `scripts/admin/patch-migration.mjs` 幂等补丁：13 个 `updated_at` 补 `ON UPDATE CURRENT_TIMESTAMP(3)`、23 个 CREATE 补显式 InnoDB/utf8mb4；全文无 DROP/TRUNCATE）；
+> CLI：`npm run db:migrate`（建库 + drizzle migrator，facai8_* 库名白名单）/ `admin:seed`（42 权限 / 4 角色 / 108 映射，幂等）/ `admin:bootstrap`（Argon2id、must_change_password=1、super_admin 关联）；
+> 测试：vitest 5.1.0 `npm run test:admin` 五套 34/34 全绿（真实 MySQL scratch 库：schema 结构 / migration 行为 / seed 幂等 / bootstrap / 17-20 位 BIGINT 精度）；lint 0 告警、typecheck、build 全绿。
+> 真实库 `facai8_admin`：24 表 + journal 1 条 + seed 42/4/108，角色映射 super_admin=42 / content_admin=32 / content_editor=22 / auditor=12，`admin_users=0`；**真实库 bootstrap 未执行**（用户未提供管理员凭据，遵守"不得伪造管理员已创建"，留待 P3 登录联调时由用户提供 env 执行）。
+> 静态快照 `src/lib/facai8/data/` 零 diff。
+> 工程决策（drizzle-orm 0.45.4 API 差异均实测验证）：全部 DATETIME(3) 用 `{ mode: "string", fsp: 3 }`（墙钟字符串无损往返）+ 池 `timezone: "Z"`；BIGINT 一律 `bigint(name, { mode: "bigint" })`（JS BigInt，20 位无损）；`link_categories.parent_id` 自引用 FK 用表级 `foreignKey()` 约束（规避列级自引用在 strict 下的类型循环）；0.45.4 无 `bigintUnsigned`/`defaultRaw`/MySQL `insert.returning()`，分别以 config 对象、`sql` 模板、唯一键回查替代。
+> DDL 文档缺陷修正：`site_tags.created_at` 误带 `ON UPDATE CURRENT_TIMESTAMP(3)`，已同步修正 `docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql`。
+
 ### 工作项
-- [ ] 将 docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql 映射为 Drizzle schema。
-- [ ] 对比字段类型、索引、外键、枚举和默认值。
-- [ ] 生成初始 migration。
-- [ ] 创建角色/权限 Seed，Seed 幂等。
-- [ ] 实现 bootstrap-admin CLI，环境变量提供初始账号和密码。
-- [ ] 使用 Argon2id hash；拒绝明文密码落库。
-- [ ] 初始管理员存在时不得静默重置密码。
+- [x] 将 docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql 映射为 Drizzle schema（14 模块 / 23 表 / 统一出口；DDL 文档缺陷先修正后生成）。
+- [x] 对比字段类型、索引、外键、枚举和默认值（`schema.test.ts` 对 information_schema 逐项核对：含 2 个组合主键、8 个唯一索引、14 个普通索引、16 条 FK 删除规则、13 个毫秒 ON UPDATE、引擎/字符集、ENUM/JSON/LONGTEXT/VARBINARY 类型）。
+- [x] 生成初始 migration（23 个 CREATE，无 DROP/TRUNCATE，FK 后置 ALTER 保证顺序；补丁脚本幂等可重跑，第二跑 0 处修改）。
+- [x] 创建角色/权限 Seed，Seed 幂等（唯一 code upsert；系统角色映射同事务重算；非系统角色与管理员数据从不触碰——seed.test.ts 验证）。
+- [x] 实现 bootstrap-admin CLI，环境变量提供初始账号和密码（缺密码/短于 12 位/弱口令命中均拒绝，无默认回退）。
+- [x] 使用 Argon2id hash；拒绝明文密码落库（scratch 库实测：hash 为 `$argon2id$` 前缀，全文检索无明文）。
+- [x] 初始管理员存在时不得静默重置密码（二次执行 = 安全 no-op，密码哈希逐字节不变，用户数不变；用户名冲突拒绝）。
 
 ### 验收
-- [ ] 空数据库 migration 成功。
-- [ ] 重复 migration 无破坏。
-- [ ] Seed 可重复执行。
-- [ ] bootstrap 成功创建管理员。
-- [ ] bootstrap 二次执行明确拒绝或安全 no-op。
-- [ ] 外键和唯一约束按预期工作。
+- [x] 空数据库 migration 成功（scratch 库：23 表 + `__drizzle_migrations`）。
+- [x] 重复 migration 无破坏（连跑 3 次：表数/数据/journal 条数不变）。
+- [x] Seed 可重复执行（二次执行不产生重复：42/4/108 恒定）。
+- [x] bootstrap 成功创建管理员（scratch 库：Argon2id + must_change_password=1 + super_admin 关联；输出对象不含明文密码/hash）。
+- [x] bootstrap 二次执行明确拒绝或安全 no-op（`already_bootstrapped`，exit 0）。
+- [x] 外键和唯一约束按预期工作（RESTRICT 阻止删除被引用父行 errno 1451；删除网址级联删详情/备用链接；删除管理员 SET NULL；唯一约束生效）。
+- [ ] 生产 `facai8_admin` 上的 bootstrap（待用户：提供 `ADMIN_BOOTSTRAP_USERNAME/PASSWORD` 后执行 `npm run admin:bootstrap`；当前真实库 `admin_users=0`，未创建、未伪造）。
 
 ## P3：认证与权限
 

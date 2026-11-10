@@ -127,7 +127,7 @@ CREATE TABLE site_tags (
   status ENUM('active','disabled') NOT NULL DEFAULT 'active',
   sort_order INT NOT NULL DEFAULT 0,
   version INT UNSIGNED NOT NULL DEFAULT 1,
-  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) NULL,
   KEY idx_site_tags_status_sort (status, sort_order)
 ) ENGINE=InnoDB;
