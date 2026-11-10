@@ -36,6 +36,10 @@
     "db:migrate": "node scripts/admin/migrate.mjs",
     "admin:seed": "node scripts/admin/seed-rbac.ts",
     "admin:bootstrap": "node scripts/admin/bootstrap-admin.ts",
+    "admin:data:inspect": "node scripts/admin/inspect-static-data.ts",
+    "admin:import:preview": "node scripts/admin/import-static-snapshot.ts",
+    "admin:import": "node scripts/admin/import-static-snapshot.ts",
+    "admin:import:verify": "node scripts/admin/verify-static-import.ts",
     "test:admin": "vitest run"
   },
   "dependencies": {

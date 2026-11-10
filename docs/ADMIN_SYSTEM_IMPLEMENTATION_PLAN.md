@@ -133,27 +133,41 @@
 
 ## P4：静态快照导入和 Repository
 
+> **执行状态：已完成（2026-11-10），等待用户验收。** 静态数据已导入 `facai8_admin`（4182 行 / 13 表，单事务提交，`admin_import_runs#1 = succeeded`）；双 Repository 一致性验证 exit 0（13 类型 + 3 派生全一致）；测试 132/132 通过；typecheck / lint / build 全绿；前台静态模式回归 12/12 页通过。`src/lib/facai8/data/` 冻结源零改动，前台仍默认 CONTENT_SOURCE=static（P8 才切换）。
+
 ### 工作项
-- [ ] 定义领域 DTO 和 Repository interfaces。
-- [ ] 实现静态只读 Repository。
-- [ ] 实现 MySQL Repository。
-- [ ] 开发 --dry-run 导入预检。
-- [ ] 开发显式 --execute 导入。
-- [ ] 保留所有原始 ID 字符串。
-- [ ] 迁移分类树、链接、标签、文章分类、文章、详情、镜像、广告、公告、线路、图标库、站点设置。
-- [ ] CAT_ORDER 变成 sort_order，验证相对顺序。
-- [ ] 生成导入摘要、校验 checksum、记录 admin_import_runs。
-- [ ] 导入不覆盖后台已编辑数据。
-- [ ] 记录图片文件引用但不把文件二进制写入 MySQL。
+- [x] 定义领域 DTO 和 Repository interfaces。（`src/lib/facai8/content/types.ts` + `repository.ts`）
+- [x] 实现静态只读 Repository。（`static-repository.ts`，只读冻结源，无 DB 依赖）
+- [x] 实现 MySQL Repository。（`mysql-repository.ts` + 8 个 mappers；mapper 层做 BIGINT→字符串、日期规范化、软删除过滤）
+- [x] 开发 --dry-run 导入预检。（`scripts/admin/import-static-snapshot.ts`；零写入，含 admin_import_runs）
+- [x] 开发显式 --execute 导入。（必须 `--execute` 且 `--confirm-database` 与实际库名完全一致）
+- [x] 保留所有原始 ID 字符串。（17/18 位 ID 全流程字符串；217/266 个 18 位 ID 经 Number 化会失真，全走字符串路径）
+- [x] 迁移分类树、链接、标签、文章分类、文章、详情、镜像、广告、公告、线路、图标库、站点设置。（13 表 4182 行；详情 122 条仅源站有档，缺失不伪造）
+- [x] CAT_ORDER 变成 sort_order，验证相对顺序。（每分类稠密排名 0..n-1；90 个有链接分类三维一致：总数/集合/顺序）
+- [x] 生成导入摘要、校验 checksum、记录 admin_import_runs。（checksum = 251537…915f；summary_json 含 13 表行数）
+- [x] 导入不覆盖后台已编辑数据。（内容表非空且无匹配成功记录 → 拒绝；同版本同 checksum 已成功 → 安全 no-op）
+- [x] 记录图片文件引用但不把文件二进制写入 MySQL。（logo/preview/cover/css 均为字符串路径，物理文件仍在 public/）
 
 ### 验收
-- [ ] dry-run 不修改数据库。
-- [ ] 导入数据量与静态源一致。
-- [ ] 所有 FK 关系验证通过。
-- [ ] 链接排序验证通过。
-- [ ] 静态文件无改动。
-- [ ] 重复导入受到保护。
-- [ ] 测试库备份和恢复成功。
+- [x] dry-run 不修改数据库。（回查 13 表全 0 行、admin_import_runs 0 行）
+- [x] 导入数据量与静态源一致。（导入后回查与快照计划逐表相等）
+- [x] 所有 FK 关系验证通过。（import fail-fast 守卫 + verify 0 孤儿）
+- [x] 链接排序验证通过。（p4-ordering 套件 + verify 顺序差异=0；标签页网格序为已知限制，见下）
+- [x] 静态文件无改动。（`src/lib/facai8/data/` 20 个文件零改动，git status 可证）
+- [x] 重复导入受到保护。（真实库复跑一次 → no-op，行数不变、无新增记录）
+- [x] 测试库备份和恢复成功。（scratch `facai8_p4_test` 自动建库/迁移/删库；132/132 测试通过）
+
+### 交付物
+- `src/lib/facai8/content/`（13 文件）：types / dates / repository 接口 / static-repository / mysql-repository / source（P8 注入点，server-only，前台未接入）/ 8 mappers
+- `scripts/admin/`：`inspect-static-data.ts`（审计）、`import-static-snapshot.ts`（导入 CLI）、`verify-static-import.ts`（§11 一致性验证）
+- `test/admin/`：p4-harness + 5 套件（static / import / parity / bigint / ordering）
+- `package.json`：`admin:data:inspect`、`admin:import:preview`、`admin:import`、`admin:import:verify`
+
+### 已知限制（如实记录，不掩盖）
+1. **标签页网格序**：P2 schema 单 `sort_order` 列无法同时编码分类序与标签序（同一链接两个维度）。MySQL 侧标签查询 = (sort_order, id)；静态侧 = TAG_ORDER 优先。集合+字段零差异，顺序有差异（108 条差 67 位 / 20 条差 17 位 / 15 条差 14 位）。verify 如实报告为 knownLimitation。若要 P8 前完全对齐需 schema 变更（新增标签序列），属 P5+ 决策。
+2. **详情/镜像无全局顺序**：两者均为逐链接查询（前台恒按 linkId 请求），全集遍历序两侧不同（档案序 vs 库序），verify 按 knownLimitation 处理；链内顺序（镜像 sort_order）严格一致。
+3. **文章 published_at**：源站 createdAt 落入 published_at；审计 updated_at 承载源 updatedAt（schema 无 source_updated_at 列，无损承载）。
+4. **文章 categoryName**：快照列 category_name_snapshot 存源站值（13/28 篇与分类现名不一致的历史事实，如实保留）。
 
 ## P5：后台 UI 框架
 
