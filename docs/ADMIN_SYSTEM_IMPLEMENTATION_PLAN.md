@@ -27,20 +27,26 @@
 
 ## P0：仓库审计与基线
 
+> **执行状态：已完成（2026-11-10），等待用户验收。** 详见 `docs/ADMIN_SYSTEM_P0_AUDIT_REPORT.md`。
+> 基线命令 lint/typecheck/build 全部通过（无原有失败）；截图 17 张存 `docs/design-references/facai8/admin-p0-baseline/`；
+> 发现问题 F1–F10：F1 本阶段已修正（技术设计文档补 searchDescriptions.ts）；F2 孤儿 CAT_ORDER 条目 → P4 跳过策略（见下）；
+> F3 `.env` 被跟踪 / F4 `.gitignore` 残留 `docs/` 规则 / F5 `tsconfig.tsbuildinfo` 被跟踪 → P1 处理；
+> F7 compose 无 MySQL 服务 → P1；F8 zod 4.3.6 传递依赖已存在 → P1 固定版本；F9/F10 → P4 决策。
+
 ### 工作项
-- [ ] 检查 Git 工作区，保护用户未提交修改。
-- [ ] 确认 Node、Next、React、npm、lockfile。
-- [ ] 扫描全部 src/app 页面和 API 路由。
-- [ ] 扫描全部 src/lib/facai8/data 静态快照。
-- [ ] 统计数据条数、ID 重复、分类孤儿、文章分类缺失、详情孤儿、备用链接孤儿、图片引用缺失。
-- [ ] 记录当前前台页面截图与行为。
-- [ ] 执行 lint/typecheck/build，记录已有失败。
-- [ ] 明确哪些页面现在是 Mock、空态或静态展示，不将其误判为真实业务能力。
+- [x] 检查 Git 工作区，保护用户未提交修改。（干净工作区，master @ f0156d2）
+- [x] 确认 Node、Next、React、npm、lockfile。（Node v24.22.2 / next 16.3.5 / react 19.2.4，无 MySQL 依赖）
+- [x] 扫描全部 src/app 页面和 API 路由。（21 页面 + 9 API，全部动态渲染）
+- [x] 扫描全部 src/lib/facai8/data 静态快照。（20 文件，含文档遗漏的 searchDescriptions.ts）
+- [x] 统计数据条数、ID 重复、分类孤儿、文章分类缺失、详情孤儿、备用链接孤儿、图片引用缺失。（60+34 分类 / 3791 网址 / 122 详情 / 66 镜像 / 28 文章；图片 0 缺失；CAT_ORDER 6 孤儿 ID = 快照时间差，导入跳过）
+- [x] 记录当前前台页面截图与行为。（17 张桌面/移动截图；11 路由控制台 0 错误）
+- [x] 执行 lint/typecheck/build，记录已有失败。（全部通过，无失败项）
+- [x] 明确哪些页面现在是 Mock、空态或静态展示，不将其误判为真实业务能力。（会员区 4 页 + 登录/注册/找回 = Mock；其余为静态快照渲染）
 
 ### 验收
-- [ ] 输出路由与数据字典。
-- [ ] 原始静态文件 Git diff 为零。
-- [ ] 基线报告包含命令输出和失败原因。
+- [x] 输出路由与数据字典。（报告 §3/§4/§5）
+- [x] 原始静态文件 Git diff 为零。（src/ 零改动）
+- [x] 基线报告包含命令输出和失败原因。（报告 §8/§10）
 
 ## P1：依赖与数据库连接
 
