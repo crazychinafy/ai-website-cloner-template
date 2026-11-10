@@ -20,6 +20,10 @@ export const adminEnvSchema = z.object({
   DB_PASSWORD: z.string().default(""),
   DB_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
   ADMIN_SESSION_TTL_HOURS: z.coerce.number().positive().max(720).default(12),
+  /** P3：CSRF HMAC 密钥。生产必须显式配置（32-256 位随机串）；开发缺省时每进程随机回退 */
+  ADMIN_CSRF_SECRET: z.string().min(32).max(256).optional(),
+  /** P3：允许的跨站 Origin 白名单（逗号分隔，绝对 http/https URL，禁止 *）；同源恒放行 */
+  ADMIN_ALLOWED_ORIGINS: z.string().max(2000).optional(),
   ADMIN_BOOTSTRAP_USERNAME: z.string().min(3).max(64).optional(),
   ADMIN_BOOTSTRAP_PASSWORD: z.string().min(12).optional(),
   UPLOAD_DIR: z.string().min(1).default("/data/facai8/uploads"),
@@ -36,6 +40,8 @@ const ADMIN_ENV_KEYS = [
   "DB_PASSWORD",
   "DB_POOL_SIZE",
   "ADMIN_SESSION_TTL_HOURS",
+  "ADMIN_CSRF_SECRET",
+  "ADMIN_ALLOWED_ORIGINS",
   "ADMIN_BOOTSTRAP_USERNAME",
   "ADMIN_BOOTSTRAP_PASSWORD",
   "UPLOAD_DIR",
@@ -62,10 +68,14 @@ export function getAdminEnv(): AdminEnv {
     const problems = result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")
     throw new Error(`[admin-env] CONTENT_SOURCE=mysql 但环境变量校验失败：${problems}`)
   }
-  // static 模式：非法 DB_* 不生效，仅告警键名（不打印值）
-  const badKeys = [...new Set(result.error.issues.map((i) => i.path.join(".") || "(root)"))].join(", ")
-  console.warn(`[admin-env] static 模式忽略非法环境变量（未生效）：${badKeys}`)
-  return adminEnvSchema.parse({ ...raw, CONTENT_SOURCE: "static" })
+  // static 模式：剔除非法键后按默认值解析（不抛错、不打印值），仅告警键名
+  const badKeys = new Set(result.error.issues.map((i) => String(i.path[0] ?? "(root)")))
+  const cleaned: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (!badKeys.has(k)) cleaned[k] = v
+  }
+  console.warn(`[admin-env] static 模式忽略非法环境变量（未生效）：${[...badKeys].join(", ")}`)
+  return adminEnvSchema.parse({ ...cleaned, CONTENT_SOURCE: "static" })
 }
 
 /** 当前前台数据源（static | mysql） */

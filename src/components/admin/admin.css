@@ -1,0 +1,247 @@
+/* 管理后台页面专属样式（P3）
+   独立于前台 facai8.css：只被 /admin 下的 layout 引入，不进入前台页面，
+   避免 Tailwind preflight 之类的全局重置影响克隆前台。 */
+
+:root {
+  --adm-bg: #0f172a;
+  --adm-panel: #1e293b;
+  --adm-border: #334155;
+  --adm-text: #e2e8f0;
+  --adm-muted: #94a3b8;
+  --adm-accent: #38bdf8;
+  --adm-danger: #f87171;
+  --adm-ok: #34d399;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+.admin-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--adm-bg);
+  color: var(--adm-text);
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+}
+
+.admin-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 居中卡片（登录 / 改密） */
+.admin-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.admin-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--adm-panel);
+  border: 1px solid var(--adm-border);
+  border-radius: 12px;
+  padding: 28px 24px;
+}
+
+.admin-card h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.admin-card .admin-sub {
+  color: var(--adm-muted);
+  font-size: 13px;
+  margin: 0 0 20px;
+}
+
+/* 受保护区域壳（顶栏） */
+.admin-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: var(--adm-panel);
+  border-bottom: 1px solid var(--adm-border);
+}
+
+.admin-topbar .admin-brand {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.admin-topbar .admin-who {
+  color: var(--adm-muted);
+  font-size: 13px;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-content {
+  flex: 1;
+  padding: 24px 20px;
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* 表单 */
+.admin-field {
+  margin-bottom: 16px;
+}
+
+.admin-field label {
+  display: block;
+  font-size: 13px;
+  color: var(--adm-muted);
+  margin-bottom: 6px;
+}
+
+.admin-inputwrap {
+  position: relative;
+  display: flex;
+}
+
+.admin-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--adm-bg);
+  border: 1px solid var(--adm-border);
+  border-radius: 8px;
+  color: var(--adm-text);
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+.admin-input::placeholder {
+  color: #64748b;
+}
+
+.admin-input:focus {
+  outline: 2px solid var(--adm-accent);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+.admin-eye {
+  border: 1px solid var(--adm-border);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: var(--adm-panel);
+  color: var(--adm-muted);
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.admin-eye:hover {
+  color: var(--adm-text);
+}
+
+.admin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--adm-accent);
+  color: #082f49;
+  font-weight: 700;
+  font-size: 14px;
+  border: 0;
+  border-radius: 8px;
+  padding: 11px 16px;
+  cursor: pointer;
+}
+
+.admin-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.admin-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--adm-border);
+  color: var(--adm-text);
+  width: auto;
+  padding: 7px 14px;
+  font-size: 13px;
+}
+
+.admin-btn-ghost:hover {
+  border-color: var(--adm-accent);
+  color: var(--adm-accent);
+}
+
+.admin-error {
+  color: var(--adm-danger);
+  font-size: 13px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  word-break: break-all;
+}
+
+.admin-note {
+  color: var(--adm-muted);
+  font-size: 12px;
+  margin-top: 14px;
+  text-align: center;
+}
+
+.admin-link {
+  color: var(--adm-accent);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.admin-link:hover {
+  text-decoration: underline;
+}
+
+/* 仪表盘占位 */
+.admin-hello {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.admin-rolebadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.admin-badge {
+  font-size: 12px;
+  color: var(--adm-accent);
+  border: 1px solid var(--adm-border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.admin-permcount {
+  color: var(--adm-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 480px) {
+  .admin-topbar .admin-who {
+    display: none;
+  }
+}

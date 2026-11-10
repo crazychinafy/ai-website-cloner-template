@@ -63,20 +63,29 @@ function openAdminConnection(): Promise<mysql.Connection> {
   })
 }
 
-export async function ensureScratch(): Promise<Pool> {
+/**
+ * 建/删 scratch 库（默认 facai8_p2_test；P3 传 "facai8_p3_test" 与 P2 套件隔离）。
+ * 守卫：只允许 facai8_ 前缀的合法库名，绝不误伤无关库。
+ */
+export async function ensureScratch(name: string = SCRATCH_DB): Promise<Pool> {
+  assertScratchName(name)
   const admin = await openAdminConnection()
-  await admin.query(`CREATE DATABASE IF NOT EXISTS \`${SCRATCH_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`)
+  await admin.query(`CREATE DATABASE IF NOT EXISTS \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`)
   await admin.end()
-  return openPool(SCRATCH_DB)
+  return openPool(name)
 }
 
-/** 只允许删除常量名的 scratch 库（防误伤） */
-export async function dropScratch(): Promise<void> {
-  if (!/^[a-z0-9_]{4,64}$/.test(SCRATCH_DB) || !SCRATCH_DB.startsWith("facai8_")) {
-    throw new Error("refuse to drop unexpected database name: " + SCRATCH_DB)
+function assertScratchName(name: string): void {
+  if (!/^[a-z0-9_]{4,64}$/.test(name) || !name.startsWith("facai8_")) {
+    throw new Error("refuse to operate on unexpected database name: " + name)
   }
+}
+
+/** 只允许删除白名单内的 scratch 库（防误伤） */
+export async function dropScratch(name: string = SCRATCH_DB): Promise<void> {
+  assertScratchName(name)
   const admin = await openAdminConnection()
-  await admin.query(`DROP DATABASE IF EXISTS \`${SCRATCH_DB}\``)
+  await admin.query(`DROP DATABASE IF EXISTS \`${name}\``)
   await admin.end()
 }
 
@@ -92,9 +101,9 @@ export function makeDb(pool: Pool) {
   return drizzle(pool, { mode: "default" })
 }
 
-/** 建 scratch 库并跑完迁移（测试 beforeAll 用） */
-export async function freshMigratedPool(): Promise<Pool> {
-  const pool = await ensureScratch()
+/** 建 scratch 库并跑完迁移（测试 beforeAll 用；name 缺省 = facai8_p2_test） */
+export async function freshMigratedPool(name: string = SCRATCH_DB): Promise<Pool> {
+  const pool = await ensureScratch(name)
   await runMigrations(pool)
   return pool
 }

@@ -15,6 +15,9 @@ import * as schema from "@/lib/db/schema"
 
 type AppDb = MySql2Database<typeof schema>
 
+/** P3+ 业务模块对 Drizzle 实例的依赖注入类型（测试可传入 scratch 库实例） */
+export type AdminDb = AppDb
+
 let pool: Pool | null = null
 let db: AppDb | null = null
 

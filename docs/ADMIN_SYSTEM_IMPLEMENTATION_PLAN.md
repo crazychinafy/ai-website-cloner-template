@@ -104,22 +104,32 @@
 
 ## P3：认证与权限
 
+> **执行状态：已完成（2026-11-10），等待用户验收。** 要点：
+> 服务端 Session（`crypto.randomBytes(32)` → base64url；DB 只存 SHA-256 摘要；HttpOnly Cookie `facai8_admin_session`，Secure=production、SameSite=Lax、Path=/、Max-Age=TTL（默认 12h，env 上限 720h），不设 Domain）；
+> 登录 `POST /api/admin/v1/auth/login`（Origin 白名单 + JSON + Zod + 限流前置 + Argon2id + 不存在账号哑验证时序均衡 + active/未软删除资格 + 统一错误文案 + last_login_at + 登录即轮换防 Fixation）；
+> 会话 `GET /api/admin/v1/auth/session`（角色/权限每次请求实时查库 + CSRF token；未登录 401；不含 token/hash）；注销 `POST .../logout`（幂等；有效 Session 需 CSRF → 撤销 DB + 清 Cookie）；改密 `POST .../change-password`（Session+CSRF+策略 12-128+弱口令表+旧密码 → 事务[改哈希/清 must 标志/撤销全部 Session/审计] → 轮换新 Session）；
+> RBAC：统一守卫 `permissions/require-permission.ts`（requireAdminSession/requireAdminPermission/getCurrentAdmin，401/403/CHANGE_PASSWORD_REQUIRED）+ 页面守卫 `auth/guards.ts`（(protected) 布局 redirect；(auth) 组独立避免重定向循环）；权限数量与 P2 Seed 字典实测核对（42/32/22/12）；
+> CSRF：SameSite=Lax + Origin 同源/白名单（`ADMIN_ALLOWED_ORIGINS`，* 拒绝、非法配置 fail-closed）+ `X-CSRF-Token`（HMAC-SHA256(ADMIN_CSRF_SECRET, token_hash)，timingSafeEqual）；生产未配密钥 → 认证操作 401 fail-closed；
+> 限流：`admin_login_attempts` 15 分钟窗口（用户名+IP ≥5 或 IP ≥20 失败 → 429 + Retry-After；只计失败、无永久锁号；24h 过期清理随每次登录尝试执行）；
+> 测试：vitest 六套 49/49 全绿（登录 13 / 限流 7 / 会话 8 / CSRF 7 / 权限 7 / 数据安全 7，真实 MySQL scratch 库 `facai8_p3_test`，与 P2 的 `facai8_p2_test` 隔离；P2 五套 34/34 不受影响，合计 83/83）；lint 0 告警、typecheck、build 全绿；13 条前台路由回归 200、静态数据目录零 diff。
+> 工程决策（实测验证）：drizzle 0.45 mysql2 对 DATETIME 走 `field.string()` 原样读回 → UTC 墙钟字符串无损往返，时间比较全部落在 SQL；varbinary 列被 drizzle 声明为 string → IP 以 `X'<hex>'` 字面量写入（`sql.raw`，无注入面）；0.45 无 `isFalse` → `eq(col, false)`。
+
 ### 工作项
-- [ ] 建立独立 admin Session。
-- [ ] 独立 Cookie facai8_admin_session。
-- [ ] 登录、登出、Session 查询。
-- [ ] 密码修改与首次登录强制修改。
-- [ ] RBAC 权限查询与服务端守卫。
-- [ ] 登录限流和临时锁定。
-- [ ] Origin/CSRF 校验。
-- [ ] 管理员禁用/角色变更后 Session 失效或权限立即刷新。
+- [x] 建立独立 admin Session（`src/lib/admin/auth/session.ts`：创建/验证/撤销/全撤销；每次请求查库，禁用/撤销/过期/软删除即时生效）。
+- [x] 独立 Cookie facai8_admin_session（`auth/cookies.ts`；与前台 facai8_session 完全隔离，前端组件不读不存 token）。
+- [x] 登录、登出、Session 查询（`services/admin-auth-service.ts` + 4 个 route：login/logout/session/change-password，均 `runtime="nodejs"` + force-dynamic）。
+- [x] 密码修改与首次登录强制修改（策略 12-128 + 弱口令表；事务内撤销该管理员全部 Session + 审计；登录成功按 must_change_password 决定跳 /admin 或 /admin/change-password；改密后轮换新 Session）。
+- [x] RBAC 权限查询与服务端守卫（`permissions/permissions.ts` 实时加载 + `permissions/require-permission.ts` 统一 401/403；页面级 `auth/guards.ts` + (auth)/(protected) route groups，无 middleware）。
+- [x] 登录限流和临时锁定（`auth/login.ts`：admin_login_attempts 双维度计数 + 429/Retry-After + 成功留痕 + 24h 清理；无永久锁号）。
+- [x] Origin/CSRF 校验（`auth/csrf.ts`：同源恒放行 + 白名单 + HMAC 派生 token + 常量时间比较 + 非法配置 fail-closed；登录/注销/改密全覆盖）。
+- [x] 管理员禁用/角色变更后 Session 失效或权限立即刷新（verifySession 每请求重查 user 状态与角色权限；测试 6/8 覆盖）。
 
 ### 验收
-- [ ] 未登录无法访问 /admin 私有页面和 API。
-- [ ] 无权限用户返回 403。
-- [ ] 注销、过期、撤销 Session 失效。
-- [ ] 伪造前台 facai8_session 不能进入后台。
-- [ ] CSRF、暴力登录测试通过。
+- [x] 未登录无法访问 /admin 私有页面和 API（(protected) 布局 redirect /admin/login；API 401；生产服务器冒烟验证）。
+- [x] 无权限用户返回 403（editor 直调 administrators.update / 移除角色后 links.read，均 403 实时生效）。
+- [x] 注销、过期、撤销 Session 失效（会话套件 4/5/7；改密后全部旧 Session 撤销）。
+- [x] 伪造前台 facai8_session 不能进入后台（单独伪造 401；与管理员 Cookie 并存时只认管理员身份）。
+- [x] CSRF、暴力登录测试通过（CSRF 7 例 + 限流 7 例，含生产未配密钥 fail-closed、通配符白名单拒绝）。
 
 ## P4：静态快照导入和 Repository
 
