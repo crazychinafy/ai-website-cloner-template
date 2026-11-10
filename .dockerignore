@@ -37,7 +37,8 @@ CLAUDE.md
 
 # Docs / research (large, not needed at runtime)
 docs
-scripts
+# Clone-era one-off scripts are excluded; keep scripts/admin (db-check, future migrations/bootstrap)
+scripts/facai8
 
 # Docker files themselves (no need to copy into image)
 Dockerfile

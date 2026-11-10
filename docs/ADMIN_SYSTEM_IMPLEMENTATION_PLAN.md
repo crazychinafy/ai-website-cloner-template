@@ -50,22 +50,28 @@
 
 ## P1：依赖与数据库连接
 
+> **执行状态：已完成（2026-11-10），等待用户验收。** 要点：
+> 固定版本 mysql2 3.24.6 / drizzle-orm 0.45.4 / drizzle-kit 0.31.11（dev）/ zod 4.6.7 / argon2 0.45.2 / sanitize-html 2.18.1 / server-only 0.0.1 / @types/sanitize-html 2.16.0（dev）（lockfile 已提交）；
+> 新增 `src/lib/admin/validation/env.ts`（Zod，CONTENT_SOURCE 默认 static）、`src/lib/db/client.ts`（server-only 惰性 mysql2 池，bigNumberStrings）、`src/lib/db/schema/`（P2 占位）、`drizzle.config.ts`、`scripts/admin/db-check.mjs`、`.env.example`；
+> 仓库卫生 F3/F4/F5 已修（.env 与 tsconfig.tsbuildinfo untrack；.gitignore 重写：docs/* 忽略克隆档案但保留 admin 文档，.env* 入库规则）；.dockerignore 保留 scripts/admin；docker-compose 增加 mysql 8.0 服务 + 独立数据卷（密码经 env 注入）。
+> 验收：无 DB 生产启动 7 路由 200；本地 MySQL 8.0.31 SELECT 1 OK（BIGINT 20 位字符串无损）；凭据在 .next/Git diff/源码 三层 0 泄漏；lint/typecheck/build 全绿；npm audit 高危项均为模板树既有（next 16.3.5 advisory 等，按约束 10 不升级，P9 决策）。
+
 ### 工作项
-- [ ] 固定兼容版本：mysql2、drizzle-orm、drizzle-kit、zod、argon2、sanitize-html。
-- [ ] 新增环境变量 schema。
-- [ ] CONTENT_SOURCE 默认 static。
-- [ ] 新增 Node.js only MySQL pool，支持 BIGINT string 返回。
-- [ ] 增加连接池最大连接数、连接超时、错误处理和优雅关闭策略。
-- [ ] DB 模块通过 server-only 防止客户端导入。
-- [ ] 增加 drizzle.config.ts。
-- [ ] 增加 .env.example，忽略真实 .env/.env.local。
-- [ ] Docker 构建上下文排除敏感文件。
+- [x] 固定兼容版本：mysql2、drizzle-orm、drizzle-kit、zod、argon2、sanitize-html（+ server-only、@types/sanitize-html；版本见上，argon2 原生模块 Node 24 hash 验证通过）。
+- [x] 新增环境变量 schema（`src/lib/admin/validation/env.ts`：CONTENT_SOURCE/DB_*/ADMIN_*/UPLOAD_DIR；Zod 白名单键解析，static 不抛错、mysql fail-fast、不打印值）。
+- [x] CONTENT_SOURCE 默认 static（schema default + compose 默认 + .env.example 注释）。
+- [x] 新增 Node.js only MySQL pool（`src/lib/db/client.ts`：惰性单例、bigNumberStrings/supportBigNumbers、UTF8MB4）。
+- [x] 增加连接池最大连接数（DB_POOL_SIZE 1-50）、连接超时 10s、错误监听（仅错误码）、closeDb() 优雅关闭。
+- [x] DB 模块通过 server-only 防止客户端导入（`import "server-only"`；包语义验证：default 条件抛错/react-server 条件空操作，生产构建通过）。
+- [x] 增加 drizzle.config.ts（dialect=mysql；kit 加载验证：0 表空 schema，无迁移，exit 0）。
+- [x] 增加 .env.example；.env/.env.local 加入 ignore 并从索引移除（文件保留磁盘）。
+- [x] Docker 构建上下文排除敏感文件（.dockerignore 已含 .env*；scripts 排除修正为仅 scripts/facai8）；docker-compose 增加 mysql 8.0 服务（独立 mysql-data 卷、默认不暴露公网、密码 ${DB_PASSWORD} 注入、healthcheck）。
 
 ### 验收
-- [ ] 无 MySQL 环境下 static 模式仍正常启动。
-- [ ] 配置 MySQL 时 SELECT 1 成功。
-- [ ] 数据库密码不出现在构建产物、浏览器 bundle、日志和 Git diff。
-- [ ] lint/typecheck/build 通过。
+- [x] 无 MySQL 环境下 static 模式仍正常启动（生产构建 `next start` 无 DB_* 变量：/、/articles、/login、/link/[id]、/category/[id]、/articles/[id]、/lines 全 200；next start + standalone 警告为模板既有行为，容器正规入口 node server.js）。
+- [x] 配置 MySQL 时 SELECT 1 成功（本地 127.0.0.1:3306 MySQL 8.0.31，scripts/admin/db-check.mjs；BIGINT UNSIGNED 20 位以字符串返回，无精度损失）。
+- [x] 数据库密码不出现在构建产物、浏览器 bundle、日志和 Git diff（.next 全量递归 + 暂存/未暂存 diff + 源码/配置文件三层检索 0 命中；db-check 输出仅 host/user/db/version）。
+- [x] lint/typecheck/build 通过（typecheck 首轮 1 错：mysql2 Pool 事件类型重载，已按 EventEmitter 断言修复）。
 
 ## P2：数据库 Schema、迁移和 Seed
 

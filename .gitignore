@@ -1,26 +1,35 @@
+# 依赖
+node_modules/
+
+# Next.js 构建产物
+.next/
+*.tsbuildinfo
+
+# 环境变量：真实 env 永不提交；仅示例文件入库
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# 文档：克隆档案默认忽略（体积大），admin 系列文档保持版本控制
+docs/*
+!docs/ADMIN_SYSTEM_*.md
+!docs/README.md
+!docs/skills/
+
+# Agent / 浏览器工具产物
 .agents/
 .claude/
-.next/
 .playwright-mcp/
 
-# Vue / Admin
-node_modules/
-docs/
-
-
-
-# 日志
+# 日志与压缩包
 *.log
-
-# 压缩包
 *.rar
 *.zip
 *.7z
 
-# 大文件
+# 二进制 / 系统文件
 *.so
-
-# 系统
 .DS_Store
 Thumbs.db
 /00back00

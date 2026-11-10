@@ -12,6 +12,8 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
+      # 数据源默认 static（SKILL 约束 8）；DB_* 由 .env.local / 部署环境注入
+      - CONTENT_SOURCE=${CONTENT_SOURCE:-static}
     env_file:
       - path: .env.local
         required: false
@@ -23,6 +25,32 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  # P1：本地/开发 MySQL。默认不暴露公网端口（取消注释则仅绑定 127.0.0.1）。
+  # 生产凭据必须经 .env.local / Secret Manager 注入，不落盘到本文件。
+  mysql:
+    image: mysql:8.0
+    container_name: facai8-mysql
+    restart: unless-stopped
+    # ports:
+    #   - "127.0.0.1:3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dev_only_change_me}
+      MYSQL_DATABASE: ${DB_NAME:-facai8_admin}
+      MYSQL_USER: ${DB_USER:-facai8_app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-dev_only_change_me}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  mysql-data:
 
   dev:
     build:
