@@ -31,7 +31,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm run build",
     "db:migrate": "node scripts/admin/migrate.mjs",
     "admin:seed": "node scripts/admin/seed-rbac.ts",

@@ -8,6 +8,7 @@
 // - 状态徽章（启用/停用/已删除）与查询串拼装小工具
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import type { LinkStatus } from "@/lib/admin/dto/link"
 import { StatusBadge } from "../feedback/StatusBadge"
 
 /** iconfont class 预览；空值显示占位。iconClass 已由服务端 Zod 限制为安全 class token */
@@ -61,6 +62,20 @@ export function TagChipPreview({
 /** 启用/停用徽章 */
 export function StatusPill({ status }: { status: "active" | "disabled" }) {
   return status === "active" ? <StatusBadge tone="success">启用</StatusBadge> : <StatusBadge tone="neutral">停用</StatusBadge>
+}
+
+/** P6B：网址三态徽章（草稿/已发布/停用） */
+export function LinkStatusPill({ status }: { status: LinkStatus }) {
+  if (status === "published") return <StatusBadge tone="success">已发布</StatusBadge>
+  if (status === "draft") return <StatusBadge tone="info">草稿</StatusBadge>
+  return <StatusBadge tone="neutral">停用</StatusBadge>
+}
+
+/** P6C：文章/公告三态徽章（草稿/已发布/已归档） */
+export function ArticleStatusPill({ status }: { status: "draft" | "published" | "archived" }) {
+  if (status === "published") return <StatusBadge tone="success">已发布</StatusBadge>
+  if (status === "draft") return <StatusBadge tone="info">草稿</StatusBadge>
+  return <StatusBadge tone="neutral">已归档</StatusBadge>
 }
 
 /** 已删除徽章（回收站视图） */

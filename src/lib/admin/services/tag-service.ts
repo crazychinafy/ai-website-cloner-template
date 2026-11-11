@@ -1,11 +1,13 @@
 // P6A：标签 Service（site_tags；颜色/图标预览数据的写入规则 + 删除保护）
 // 删除保护：使用中的标签（含软删除网址引用）→ 拒绝。全局排序。
+// P6A.1：恢复前复查同名冲突（409 TAG_NAME_CONFLICT）；创建/改名/恢复竞态由
+// uq_site_tags_active_name 兜底，ER_DUP_ENTRY 映射为业务错误。
 import "server-only"
 import { ContentError, versionConflict } from "../validation/content-error.ts"
 import type { WriteCtx } from "../audit/audit-writer.ts"
 import { writeAudit } from "../audit/audit-writer.ts"
 import { getDrizzle, type AdminDb } from "@/lib/db/client"
-import { asExecutor } from "../repositories/executor.ts"
+import { asExecutor, isUniqueRaceError } from "../repositories/executor.ts"
 import * as repo from "../repositories/tag-repository.ts"
 import type { CreateTagInput, ReorderTagsInput, TagListQuery, UpdateTagInput } from "../validation/tag-schema.ts"
 import type { StatusChangeInput } from "./category-service.ts"
@@ -30,14 +32,21 @@ export async function createTag(ctx: WriteCtx, input: CreateTagInput, db: AdminD
     const conflict = await repo.findTagNameConflict(asExecutor(tx), input.name)
     if (conflict) throw nameConflict()
     const sortOrder = input.sortOrder ?? (await repo.maxTagSortOrder(asExecutor(tx))) + 1
-    const id = await repo.insertTag(tx, {
-      name: input.name,
-      iconClass: input.iconClass ?? "",
-      color: input.color ?? "#000000",
-      bgColor: input.bgColor ?? "#ffffff",
-      sortOrder,
-      status: input.status ?? "active",
-    })
+    let id: string
+    try {
+      id = await repo.insertTag(tx, {
+        name: input.name,
+        iconClass: input.iconClass ?? "",
+        color: input.color ?? "#000000",
+        bgColor: input.bgColor ?? "#ffffff",
+        sortOrder,
+        status: input.status ?? "active",
+      })
+    } catch (e) {
+      // 并发同名竞态 → uq_site_tags_active_name 兜底（422 与预检查路径同契约）
+      if (isUniqueRaceError(e)) throw nameConflict()
+      throw e
+    }
     const record = await repo.getTagById(asExecutor(tx), id)
     if (!record) throw new ContentError(500, "INTERNAL_ERROR", "标签创建后读取失败")
     await writeAudit(tx, ctx, {
@@ -81,7 +90,13 @@ export async function updateTag(
     if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder
     if (input.status !== undefined) patch.status = input.status
 
-    const ok = await repo.updateTagWithVersion(tx, id, input.version, patch)
+    let ok: boolean
+    try {
+      ok = await repo.updateTagWithVersion(tx, id, input.version, patch)
+    } catch (e) {
+      if (isUniqueRaceError(e)) throw nameConflict()
+      throw e
+    }
     if (!ok) throw versionConflict()
     const record = await repo.getTagById(asExecutor(tx), id)
     if (!record) throw notFound()
@@ -199,7 +214,17 @@ export async function restoreTag(
     if (!current) throw notFound()
     if (!current.deletedAt) throw new ContentError(422, "VALIDATION_ERROR", "该标签未被删除，无需恢复")
     if (version !== current.version) throw versionConflict()
-    const ok = await repo.restoreTag(tx, id, version)
+    // P6A.1：恢复前复查全局同名（软删除期间同名标签可能已被新建）→ 409 业务冲突
+    const conflict = await repo.findTagNameConflict(asExecutor(tx), current.name, id)
+    if (conflict) throw restoreNameConflict(current.name)
+    let ok: boolean
+    try {
+      ok = await repo.restoreTag(tx, id, version)
+    } catch (e) {
+      // 并发恢复/新建竞态 → uq_site_tags_active_name 兜底
+      if (isUniqueRaceError(e)) throw restoreNameConflict(current.name)
+      throw e
+    }
     if (!ok) throw versionConflict()
     const record = await repo.getTagById(asExecutor(tx), id)
     if (!record) throw notFound()
@@ -220,4 +245,11 @@ function notFound(): ContentError {
 
 function nameConflict(): ContentError {
   return new ContentError(422, "VALIDATION_ERROR", "标签名称已存在", { name: "标签名称已存在" })
+}
+
+/** P6A.1：恢复时名称已被占用（预检查命中或 UNIQUE 索引竞态兜底） */
+function restoreNameConflict(name: string): ContentError {
+  return new ContentError(409, "TAG_NAME_CONFLICT", `同名标签「${name}」已存在，无法恢复`, {
+    name: `同名标签「${name}」已存在，无法恢复`,
+  })
 }

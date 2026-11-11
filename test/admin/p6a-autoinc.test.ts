@@ -58,7 +58,7 @@ describe("P6A AUTO_INCREMENT（migration 0001）", () => {
     }
   })
 
-  it("site_links 主键不受 0001 影响（仍由应用生成 ID）", async () => {
+  it("site_links 主键：0001 不动，P6B 0003 起转 AUTO_INCREMENT（快照显式 ID 仍可写入）", async () => {
     const rows = await rawQuery<ColumnProbe>(
       env.pool,
       "SELECT COLUMN_TYPE, EXTRA FROM information_schema.COLUMNS " +
@@ -66,7 +66,8 @@ describe("P6A AUTO_INCREMENT（migration 0001）", () => {
       ["facai8_p6a_test"],
     )
     expect(rows[0]!.COLUMN_TYPE).toBe("bigint unsigned")
-    expect(rows[0]!.EXTRA).not.toContain("auto_increment")
+    // P6B migration 0003：BIGINT UNSIGNED AUTO_INCREMENT（快照 17/18 位显式 ID 不受影响）
+    expect(rows[0]!.EXTRA).toContain("auto_increment")
   })
 
   it("Service 新建记录由数据库顺序生成 ID（string DTO，version 从 1 起）", async () => {

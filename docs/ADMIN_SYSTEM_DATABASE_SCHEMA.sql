@@ -90,7 +90,8 @@ CREATE TABLE admin_login_attempts (
 ) ENGINE=InnoDB;
 
 CREATE TABLE link_categories (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6A migration 0001：id 已转 AUTO_INCREMENT（快照显式 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   parent_id BIGINT UNSIGNED NULL,
   name VARCHAR(120) NOT NULL,
   icon_class VARCHAR(255) NOT NULL DEFAULT '',
@@ -101,12 +102,18 @@ CREATE TABLE link_categories (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) NULL,
+  -- P6A.1：软删除唯一名称的数据库层防线（STORED 生成列 + UNIQUE，见 migration 0002）。
+  -- parent_scope_id：根分类哨兵 0；active_name：deleted_at IS NULL 时取 name，否则 NULL（NULL 不参与 UNIQUE）
+  parent_scope_id BIGINT UNSIGNED GENERATED ALWAYS AS (CASE WHEN parent_id IS NULL THEN 0 ELSE parent_id END) STORED,
+  active_name VARCHAR(120) GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN name ELSE NULL END) STORED,
+  UNIQUE KEY uq_link_categories_active_name (parent_scope_id, active_name),
   KEY idx_link_categories_parent_sort (parent_id, status, sort_order),
   CONSTRAINT fk_link_categories_parent FOREIGN KEY (parent_id) REFERENCES link_categories(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
 CREATE TABLE article_categories (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6A migration 0001：id 已转 AUTO_INCREMENT
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(120) NOT NULL,
   icon_class VARCHAR(255) NOT NULL DEFAULT '',
   sort_order INT NOT NULL DEFAULT 0,
@@ -115,11 +122,15 @@ CREATE TABLE article_categories (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) NULL,
+  -- P6A.1：见 link_categories 注释；文章分类名称全局唯一（未删除行）
+  active_name VARCHAR(120) GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN name ELSE NULL END) STORED,
+  UNIQUE KEY uq_article_categories_active_name (active_name),
   KEY idx_article_categories_status_sort (status, sort_order)
 ) ENGINE=InnoDB;
 
 CREATE TABLE site_tags (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6A migration 0001：id 已转 AUTO_INCREMENT
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
   icon_class VARCHAR(255) NOT NULL DEFAULT '',
   color VARCHAR(32) NOT NULL DEFAULT '#000000',
@@ -129,11 +140,15 @@ CREATE TABLE site_tags (
   version INT UNSIGNED NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) NULL,
+  -- P6A.1：见 link_categories 注释；标签名称全局唯一（未删除行）
+  active_name VARCHAR(100) GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN name ELSE NULL END) STORED,
+  UNIQUE KEY uq_site_tags_active_name (active_name),
   KEY idx_site_tags_status_sort (status, sort_order)
 ) ENGINE=InnoDB;
 
 CREATE TABLE site_links (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6B migration 0003：id 已转 AUTO_INCREMENT（快照 17/18 位显式 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   category_id BIGINT UNSIGNED NOT NULL,
   tag_id BIGINT UNSIGNED NULL,
   title VARCHAR(255) NOT NULL,
@@ -181,7 +196,8 @@ CREATE TABLE site_link_mirrors (
 ) ENGINE=InnoDB;
 
 CREATE TABLE articles (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6C migration 0004：id 已转 AUTO_INCREMENT（历史雪花 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   category_id BIGINT UNSIGNED NOT NULL,
   title VARCHAR(500) NOT NULL,
   content_html LONGTEXT NOT NULL,
@@ -205,7 +221,8 @@ CREATE TABLE articles (
 ) ENGINE=InnoDB;
 
 CREATE TABLE bulletins (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6C migration 0004：id 已转 AUTO_INCREMENT（历史雪花 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   title VARCHAR(500) NOT NULL,
   content_html LONGTEXT NOT NULL,
   status ENUM('draft','published','archived') NOT NULL DEFAULT 'published',

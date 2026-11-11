@@ -25,12 +25,30 @@ export type AdminErrorCode =
   | "CATEGORY_PARENT_NOT_LEVEL_ONE"
   | "CATEGORY_CYCLE"
   | "CATEGORY_RESTORE_BLOCKED"
+  // P6A.1：父级停用状态 + 恢复名称冲突（409；前缀检查或 UNIQUE 索引兜底竞态）
+  | "CATEGORY_PARENT_DISABLED"
+  | "CATEGORY_NAME_CONFLICT"
   | "ARTICLE_CATEGORY_NOT_FOUND"
   | "ARTICLE_CATEGORY_HAS_ARTICLES"
+  | "ARTICLE_CATEGORY_NAME_CONFLICT"
   | "TAG_NOT_FOUND"
   | "TAG_HAS_LINKS"
+  | "TAG_NAME_CONFLICT"
   | "REORDER_SCOPE_MISMATCH"
   | "REORDER_DUPLICATE"
+  // P6B：网址管理业务错误码（site_links 聚合：详情 1:1 + 备用链接 1:N）
+  | "LINK_NOT_FOUND"
+  | "LINK_STATUS_TRANSITION"
+  | "LINK_RESTORE_BLOCKED"
+  | "LINK_MIRROR_MISMATCH"
+  | "LINK_MIRROR_DUPLICATE"
+  | "TAG_NOT_USABLE"
+  // P6C：文章/公告管理业务错误码（发布状态机 + 软删除恢复 + 批量排序）
+  | "ARTICLE_NOT_FOUND"
+  | "ARTICLE_STATUS_TRANSITION"
+  | "ARTICLE_RESTORE_BLOCKED"
+  | "BULLETIN_NOT_FOUND"
+  | "BULLETIN_STATUS_TRANSITION"
 
 export function ok(data: unknown, init?: { status?: number; headers?: Record<string, string> }): Response {
   return Response.json(

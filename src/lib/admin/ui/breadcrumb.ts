@@ -22,6 +22,18 @@ const PAGE_TITLES: Record<string, string> = {
   "/admin/forbidden": "权限不足",
 }
 
+/**
+ * P6C：编辑器子页（新建/详情）标题映射。
+ * 模式匹配动态段（数字 ID），标题为静态文案——绝不把 URL 原始片段暴露为标题；
+ * 所属模块页（如 文章管理）作为可点击上级挂在前面。
+ */
+const SUBPAGE_TITLES: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /^\/admin\/articles\/new$/, label: "新建文章" },
+  { pattern: /^\/admin\/articles\/\d+$/, label: "编辑文章" },
+  { pattern: /^\/admin\/bulletins\/new$/, label: "新建公告" },
+  { pattern: /^\/admin\/bulletins\/\d+$/, label: "编辑公告" },
+]
+
 /** 后台根路径（面包屑起点） */
 const ROOT = "/admin"
 
@@ -77,6 +89,20 @@ export function buildBreadcrumb(pathname: string, nav: AdminNavTop[]): Crumb[] {
     if (leaf.groupLabel) crumbs.push({ label: leaf.groupLabel })
     crumbs.push({ label: leaf.label })
     return crumbs
+  }
+
+  // P6C 编辑器子页（/new、/[id]）：挂在已注册模块页之下（上级可点击），
+  // 当前页标题用静态映射；模块页对当前权限不可见时仍回退单一"工作台"
+  for (const { pattern, label } of SUBPAGE_TITLES) {
+    if (!pattern.test(clean)) continue
+    const ancestor = leafIndex(nav).get(clean.slice(0, clean.lastIndexOf("/")))
+    if (ancestor?.href) {
+      if (ancestor.groupLabel) crumbs.push({ label: ancestor.groupLabel })
+      crumbs.push({ label: ancestor.label, href: ancestor.href })
+      crumbs.push({ label })
+      return crumbs
+    }
+    break
   }
 
   // 未注册路径：不暴露原始路径片段，保持单一"工作台"

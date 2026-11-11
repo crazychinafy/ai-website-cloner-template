@@ -6,13 +6,19 @@
 // - 乐观锁：提交 version ≠ 当前 version → 409 VERSION_CONFLICT
 // - 软删除前置保护：分类下（含软删除）仍有网址 → 拒绝；存在未删除子分类 → 拒绝
 // - 状态级联：停用一级分类 → 其下启用中的二级分类同事务停用（恢复不自动级联）
+// P6A.1 缺陷修复：
+// - 启用中的二级分类只能挂在启用中的一级分类下（create/move/restore 检查目标/当前一级状态；
+//   停用挂停用允许）。恢复同时复查存在性/软删除/版本/同级同名冲突
+// - 并发安全：写事务先 FOR UPDATE 锁父级行再做规则检查（锁序：父 → 自身/子级），
+//   数据库 UNIQUE(active name) 索引兜底竞态，ER_DUP_ENTRY 映射为业务错误（不透出 SQL 异常）
 import "server-only"
 import { ContentError, versionConflict } from "../validation/content-error.ts"
 import type { WriteCtx } from "../audit/audit-writer.ts"
 import { writeAudit } from "../audit/audit-writer.ts"
 import { getDrizzle, type AdminDb } from "@/lib/db/client"
-import { asExecutor } from "../repositories/executor.ts"
+import { asExecutor, isUniqueRaceError } from "../repositories/executor.ts"
 import * as catRepo from "../repositories/category-repository.ts"
+import type { CategoryBrief } from "../repositories/category-repository.ts"
 import type { CategoryListQuery, CategoryTreeQuery, CreateCategoryInput, ReorderCategoriesInput, UpdateCategoryInput } from "../validation/category-schema.ts"
 import type { CategoryDto, CategoryTreeNodeDto } from "../dto/content.ts"
 import { pageResult } from "../dto/content.ts"
@@ -83,17 +89,27 @@ export async function createCategory(
 ): Promise<{ data: CategoryDto }> {
   const parentId = input.parentId ?? null
   return db.transaction(async (tx) => {
-    if (parentId !== null) await assertParentUsable(asExecutor(tx), parentId)
+    if (parentId !== null) {
+      const parent = await assertParentUsable(asExecutor(tx), parentId)
+      assertActiveUnderActiveParent(parent, input.status ?? "active")
+    }
     const conflict = await catRepo.findCategoryNameConflict(asExecutor(tx), input.name, parentId)
     if (conflict) throw nameConflict()
     const sortOrder = input.sortOrder ?? (await catRepo.maxSortOrderInScope(asExecutor(tx), parentId)) + 1
-    const id = await catRepo.insertCategory(tx, {
-      name: input.name,
-      parentId,
-      iconClass: input.iconClass ?? "",
-      sortOrder,
-      status: input.status ?? "active",
-    })
+    let id: string
+    try {
+      id = await catRepo.insertCategory(tx, {
+        name: input.name,
+        parentId,
+        iconClass: input.iconClass ?? "",
+        sortOrder,
+        status: input.status ?? "active",
+      })
+    } catch (e) {
+      // 并发同名竞态由 uq_link_categories_active_name 兜底（锁只串行化同父级，根级靠索引）
+      if (isUniqueRaceError(e)) throw nameConflict()
+      throw e
+    }
     const record = await catRepo.getCategoryById(asExecutor(tx), id)
     if (!record) throw new ContentError(500, "INTERNAL_ERROR", "分类创建后读取失败")
     await writeAudit(tx, ctx, {
@@ -124,7 +140,9 @@ export async function updateCategory(
     if (moving) {
       if (newParentId === id) throw new ContentError(422, "CATEGORY_CYCLE", "不能把分类移动到自身之下")
       if (newParentId !== null) {
-        await assertParentUsable(asExecutor(tx), newParentId)
+        const parent = await assertParentUsable(asExecutor(tx), newParentId)
+        // P6A.1：移入停用中的一级下时，被移动分类（或其目标状态）不能是启用中
+        assertActiveUnderActiveParent(parent, input.status ?? current.status)
         // 成为二级分类的前提：自身当前没有任何子分类（否则出现三级结构）
         const children = await catRepo.getDirectChildren(asExecutor(tx), id)
         if (children.length > 0) {
@@ -151,7 +169,14 @@ export async function updateCategory(
       patch.status = input.status
     }
 
-    const ok = await catRepo.updateCategoryWithVersion(tx, id, input.version, patch)
+    let ok: boolean
+    try {
+      ok = await catRepo.updateCategoryWithVersion(tx, id, input.version, patch)
+    } catch (e) {
+      // 改名/移动与并发创建竞态 → UNIQUE 索引兜底
+      if (isUniqueRaceError(e)) throw nameConflict()
+      throw e
+    }
     if (!ok) throw versionConflict()
 
     // 停用一级分类 → 级联停用启用中的二级分类（同事务；审计汇总条数）
@@ -251,7 +276,9 @@ export async function deleteCategory(
   db: AdminDb = getDrizzle(),
 ): Promise<{ data: CategoryDto }> {
   return db.transaction(async (tx) => {
-    const current = await catRepo.getCategoryById(asExecutor(tx), id)
+    // P6A.1：先锁自身行再做保护检查。子级挂入/移出/恢复都先锁父级，
+    // 持锁保证「检查无未删除子级 → 软删除」之间不会有新子级挂入（悬空二级 TOCTOU）
+    const current = await catRepo.lockCategoryBriefForUpdate(asExecutor(tx), id)
     if (!current || current.deletedAt) throw notFound()
     if (version !== current.version) throw versionConflict()
 
@@ -299,15 +326,27 @@ export async function restoreCategory(
       throw new ContentError(422, "VALIDATION_ERROR", "该分类未被删除，无需恢复")
     }
     if (version !== current.version) throw versionConflict()
-    // 二级分类的父级必须活着（或先恢复一级分类）
+    // 二级分类的父级必须活着（或先恢复一级分类）；P6A.1 加父级行锁 + 状态规则
     if (current.parentId !== null) {
-      const parent = await catRepo.getCategoryBrief(asExecutor(tx), current.parentId)
+      const parent = await catRepo.lockCategoryBriefForUpdate(asExecutor(tx), current.parentId)
       if (!parent) throw new ContentError(409, "CATEGORY_PARENT_NOT_FOUND", "上级分类不存在，无法恢复")
       if (parent.deletedAt) {
         throw new ContentError(409, "CATEGORY_RESTORE_BLOCKED", `上级分类「${parent.name}」尚未恢复，请先恢复上级分类`)
       }
+      // 启用中的二级不能恢复到停用的一级下（停用挂停用允许）
+      assertActiveUnderActiveParent(parent, current.status)
     }
-    const ok = await catRepo.restoreCategory(tx, id, version)
+    // P6A.1：恢复前复查同级同名冲突（软删除期间同名分类可能已被新建）
+    const conflict = await catRepo.findCategoryNameConflict(asExecutor(tx), current.name, current.parentId, id)
+    if (conflict) throw restoreNameConflict(current.name)
+    let ok: boolean
+    try {
+      ok = await catRepo.restoreCategory(tx, id, version)
+    } catch (e) {
+      // 并发恢复/新建竞态 → uq_link_categories_active_name 兜底
+      if (isUniqueRaceError(e)) throw restoreNameConflict(current.name)
+      throw e
+    }
     if (!ok) throw versionConflict()
     const record = await catRepo.getCategoryById(asExecutor(tx), id)
     if (!record) throw notFound()
@@ -332,9 +371,20 @@ function nameConflict(): ContentError {
   return new ContentError(422, "VALIDATION_ERROR", "同一上级分类下已存在同名分类", { name: "同一上级分类下已存在同名分类" })
 }
 
-/** parentId 可用性：存在 + 未删除 + 一级 */
-async function assertParentUsable(exec: Parameters<typeof catRepo.getCategoryBrief>[0], parentId: string): Promise<void> {
-  const parent = await catRepo.getCategoryBrief(exec, parentId)
+/** P6A.1：恢复时目标同级已被占用名称（预检查命中或 UNIQUE 索引竞态兜底） */
+function restoreNameConflict(name: string): ContentError {
+  return new ContentError(409, "CATEGORY_NAME_CONFLICT", `同级下已存在同名分类「${name}」，无法恢复`, {
+    name: `同级下已存在同名分类「${name}」，无法恢复`,
+  })
+}
+
+/**
+ * parentId 可用性：存在 + 未删除 + 一级。
+ * P6A.1：改为 FOR UPDATE 锁定读并返回父级行——写事务持有父级锁后，
+ * 并发的停用/删除/再移动都被阻塞，规则检查无 TOCTOU；锁序约定「先父后子」。
+ */
+async function assertParentUsable(exec: Parameters<typeof catRepo.lockCategoryBriefForUpdate>[0], parentId: string): Promise<CategoryBrief> {
+  const parent = await catRepo.lockCategoryBriefForUpdate(exec, parentId)
   if (!parent || parent.deletedAt) {
     throw new ContentError(422, "CATEGORY_PARENT_NOT_FOUND", "上级分类不存在或已被删除", {
       parentId: "上级分类不存在或已被删除",
@@ -345,16 +395,29 @@ async function assertParentUsable(exec: Parameters<typeof catRepo.getCategoryBri
       parentId: "只能选择一级分类作为上级",
     })
   }
+  return parent
 }
 
-/** 状态机规则：二级分类启用前，一级必须启用（一级停用会级联停用二级） */
+/**
+ * P6A.1 核心规则：启用状态的分类不能挂在停用的一级分类下（新建/移动/恢复三个入口）。
+ * effectiveStatus = 写入后将生效的状态（input.status ?? 当前/存储状态）。停用挂停用合法。
+ */
+function assertActiveUnderActiveParent(parent: CategoryBrief, effectiveStatus: "active" | "disabled"): void {
+  if (effectiveStatus === "active" && parent.status === "disabled") {
+    throw new ContentError(409, "CATEGORY_PARENT_DISABLED", `上级分类「${parent.name}」处于停用状态，请先启用上级分类`, {
+      status: "上级分类处于停用状态，请先启用上级分类",
+    })
+  }
+}
+
+/** 状态机规则：二级分类启用前，一级必须启用（一级停用会级联停用二级）；P6A.1 加父级行锁 */
 async function assertStatusAllowed(
-  exec: Parameters<typeof catRepo.getCategoryBrief>[0],
+  exec: Parameters<typeof catRepo.lockCategoryBriefForUpdate>[0],
   current: { parentId: string | null; status: string },
   next: "active" | "disabled",
 ): Promise<void> {
   if (next === "active" && current.parentId !== null) {
-    const parent = await catRepo.getCategoryBrief(exec, current.parentId)
+    const parent = await catRepo.lockCategoryBriefForUpdate(exec, current.parentId)
     if (!parent || parent.deletedAt) {
       throw new ContentError(409, "CATEGORY_PARENT_NOT_FOUND", "上级分类不存在或已被删除，无法启用该二级分类")
     }

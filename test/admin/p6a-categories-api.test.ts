@@ -627,6 +627,174 @@ describe("P6A 分类：软删除保护与恢复", () => {
   })
 })
 
+// ── P6A.1 缺陷修复回归（任务书 §缺陷1/缺陷2 的 8 项场景）──────────────
+describe("P6A.1 分类：停用父级保护 + 恢复名称冲突（缺陷回归）", () => {
+  async function disableCat(id: string): Promise<Response> {
+    const cur = (await getCat(id)).data!
+    return statusRoute.PATCH(reqFor(su, "PATCH", `/api/admin/v1/categories/${id}/status`, { status: "disabled", version: cur.version }), ctxOf(id))
+  }
+  async function enableCat(id: string): Promise<Response> {
+    const cur = (await getCat(id)).data!
+    return statusRoute.PATCH(reqFor(su, "PATCH", `/api/admin/v1/categories/${id}/status`, { status: "active", version: cur.version }), ctxOf(id))
+  }
+  async function deleteCat(id: string): Promise<Response> {
+    const cur = (await getCat(id)).data!
+    return itemRoute.DELETE(reqFor(su, "DELETE", `/api/admin/v1/categories/${id}?version=${cur.version}`, undefined), ctxOf(id))
+  }
+
+  it("1) 停用一级下新建启用二级 → 409 CATEGORY_PARENT_DISABLED", async () => {
+    const p = await createCat("p6a1_停用父A")
+    expect(p.res.status).toBe(200)
+    expect((await disableCat(p.json.data!.id)).status).toBe(200)
+
+    const made = await createCat("p6a1_不该成功", { parentId: p.json.data!.id })
+    expect(made.res.status).toBe(409)
+    expect(made.json.error?.code).toBe("CATEGORY_PARENT_DISABLED") // createCat 已消费 body，复用返回的 json
+  })
+
+  it("2) 停用一级下显式新建停用二级 → 200（停用挂停用允许）；启用它仍 409", async () => {
+    const p = C["p6a1_停用父A"]
+    const made = await createCat("p6a1_停用子挂停用", { parentId: p.id, extra: { status: "disabled" } })
+    expect(made.res.status).toBe(200)
+    expect(made.json.data!.status).toBe("disabled")
+
+    const cur = made.json.data!
+    const res = await statusRoute.PATCH(reqFor(su, "PATCH", `/api/admin/v1/categories/${cur.id}/status`, { status: "active", version: cur.version }), ctxOf(cur.id))
+    expect(res.status).toBe(409)
+    const j = await body<never>(res)
+    expect(j.error?.code).toBe("VALIDATION_ERROR") // 状态端点既有契约保持
+    expect(j.error?.message).toContain("处于停用状态")
+  })
+
+  it("3) 停用一级级联：子分类 version 各自 +1（同事务）", async () => {
+    const p = await createCat("p6a1_级联父")
+    const c1 = await createCat("p6a1_级联子1", { parentId: p.json.data!.id })
+    const c2 = await createCat("p6a1_级联子2", { parentId: p.json.data!.id })
+    const before1 = (await getCat(c1.json.data!.id)).data!
+    const before2 = (await getCat(c2.json.data!.id)).data!
+
+    expect((await disableCat(p.json.data!.id)).status).toBe(200)
+    const after1 = (await getCat(c1.json.data!.id)).data!
+    const after2 = (await getCat(c2.json.data!.id)).data!
+    expect(after1.status).toBe("disabled")
+    expect(after2.status).toBe("disabled")
+    expect(after1.version).toBe(before1.version + 1)
+    expect(after2.version).toBe(before2.version + 1)
+  })
+
+  it("4) 移动：启用二级移入停用一级 → 409 CATEGORY_PARENT_DISABLED；停用二级移入 → 200", async () => {
+    const disabledParent = C["p6a1_停用父A"]
+    const activeParent = (await createCat("p6a1_移动父B")).json.data!
+    const activeChild = (await createCat("p6a1_移动活跃子", { parentId: activeParent.id })).json.data!
+    let res = await itemRoute.PATCH(reqFor(su, "PATCH", `/api/admin/v1/categories/${activeChild.id}`, { parentId: disabledParent.id, version: activeChild.version }), ctxOf(activeChild.id))
+    expect(res.status).toBe(409)
+    expect((await body<never>(res)).error?.code).toBe("CATEGORY_PARENT_DISABLED")
+
+    const disabledChild = (await createCat("p6a1_移动停用子", { parentId: activeParent.id, extra: { status: "disabled" } })).json.data!
+    res = await itemRoute.PATCH(reqFor(su, "PATCH", `/api/admin/v1/categories/${disabledChild.id}`, { parentId: disabledParent.id, version: disabledChild.version }), ctxOf(disabledChild.id))
+    expect(res.status).toBe(200)
+    expect((await getCat(disabledChild.id)).data!.parentId).toBe(disabledParent.id)
+  })
+
+  it("5) 恢复：启用二级 + 停用一级 → 409 CATEGORY_PARENT_DISABLED；启用一级后重试 → 200", async () => {
+    const p = (await createCat("p6a1_恢复父")).json.data!
+    const child = (await createCat("p6a1_恢复子A", { parentId: p.id })).json.data!
+    expect((await deleteCat(child.id)).status).toBe(200) // 删除后存储状态仍为 active
+    expect((await disableCat(p.id)).status).toBe(200) // 级联不影响已删除行
+
+    const deleted = (await getCat(child.id)).data!
+    let res = await restoreRoute.POST(reqFor(su, "POST", `/api/admin/v1/categories/${child.id}/restore`, { version: deleted.version }), ctxOf(child.id))
+    expect(res.status).toBe(409)
+    expect((await body<never>(res)).error?.code).toBe("CATEGORY_PARENT_DISABLED")
+
+    expect((await enableCat(p.id)).status).toBe(200)
+    const after = (await getCat(child.id)).data!
+    res = await restoreRoute.POST(reqFor(su, "POST", `/api/admin/v1/categories/${child.id}/restore`, { version: after.version }), ctxOf(child.id))
+    expect(res.status).toBe(200)
+    expect((await body<CategoryDto>(res)).data!.deletedAt).toBeNull()
+  })
+
+  it("6) 恢复同名：同级占用 → 409 CATEGORY_NAME_CONFLICT；不同父级不受影响；清障后重试 → 200", async () => {
+    const p = (await createCat("p6a1_冲突父")).json.data!
+    const other = (await createCat("p6a1_另一父")).json.data!
+    const original = (await createCat("p6a1_同名子", { parentId: p.id })).json.data!
+    expect((await deleteCat(original.id)).status).toBe(200)
+    // 软删除让出名称 → 新建同名成功
+    const blocker = (await createCat("p6a1_同名子", { parentId: p.id, key: "blocker" })).json.data!
+    // 不同父级同名不受影响（uq 作用域 = parent_scope_id）
+    const diffParent = await createCat("p6a1_同名子", { parentId: other.id })
+    expect(diffParent.res.status).toBe(200)
+
+    const deleted = (await getCat(original.id)).data!
+    let res = await restoreRoute.POST(reqFor(su, "POST", `/api/admin/v1/categories/${original.id}/restore`, { version: deleted.version }), ctxOf(original.id))
+    expect(res.status).toBe(409)
+    expect((await body<never>(res)).error?.code).toBe("CATEGORY_NAME_CONFLICT")
+
+    expect((await deleteCat(blocker.id)).status).toBe(200)
+    const after = (await getCat(original.id)).data!
+    res = await restoreRoute.POST(reqFor(su, "POST", `/api/admin/v1/categories/${original.id}/restore`, { version: after.version }), ctxOf(original.id))
+    expect(res.status).toBe(200)
+    expect((await body<CategoryDto>(res)).data!.deletedAt).toBeNull()
+  })
+
+  it("7) 并发：停用一级 vs 其下新建启用二级 → 终态不存在“启用子挂停用父”", async () => {
+    const p = (await createCat("p6a1_并发父")).json.data!
+    const [disableRes, createRes] = await Promise.all([
+      disableCat(p.id),
+      createCat("p6a1_并发新建子", { parentId: p.id }),
+    ])
+    // 两种合法结局：停用先行 → 新建 409；新建先行 → 新建 200 但被停用级联带上
+    const dis = disableRes.status
+    const crt = createRes.res.status
+    expect((dis === 200 && (crt === 200 || crt === 409))).toBe(true)
+    expect((await getCat(p.id)).data!.status).toBe("disabled")
+    if (crt === 200) {
+      expect((await getCat(createRes.json.data!.id)).data!.status).toBe("disabled")
+    } else {
+      expect(createRes.json.error?.code).toBe("CATEGORY_PARENT_DISABLED")
+    }
+  })
+
+  it("8) 并发恢复：两条同名软删除一级 → 终态恰好一条未删除（UNIQUE 兜底）", async () => {
+    const a = (await createCat("p6a1_并发恢复")).json.data!
+    expect((await deleteCat(a.id)).status).toBe(200)
+    const b = (await createCat("p6a1_并发恢复")).json.data! // 软删除让出名称 → 同名再建
+    expect((await deleteCat(b.id)).status).toBe(200)
+
+    const activeCount = async (): Promise<number> => {
+      const rows = await rawQuery<{ n: number }>(
+        env.pool,
+        "SELECT COUNT(*) AS n FROM link_categories WHERE name = ? AND deleted_at IS NULL",
+        ["p6a1_并发恢复"],
+      )
+      return Number(rows[0]!.n)
+    }
+    const call = (id: string, v: number) =>
+      restoreRoute.POST(reqFor(su, "POST", `/api/admin/v1/categories/${id}/restore`, { version: v }), ctxOf(id))
+
+    const [r1, r2] = await Promise.all([call(a.id, (await getCat(a.id)).data!.version), call(b.id, (await getCat(b.id)).data!.version)])
+    for (const r of [r1, r2]) {
+      // 绝不能出现 500：竞态失败也必须映射为业务 409（SQL 异常不透出）
+      if (r.status !== 200) expect(r.status).toBe(409)
+      if (r.status === 409) {
+        const j = await body<never>(r)
+        expect(["CATEGORY_NAME_CONFLICT", "VERSION_CONFLICT"]).toContain(j.error?.code)
+      }
+    }
+    const wins = [r1, r2].filter((r) => r.status === 200).length
+    expect(wins).toBeLessThanOrEqual(1) // 同名不可能双双成功（UNIQUE）
+    expect(await activeCount()).toBe(wins)
+
+    if (wins === 0) {
+      // [409,409] 合法成因：死锁回滚后 InnoDB purge 延迟，幸存者仍见幽灵索引记录。
+      // 模拟管理员再点一次 → 必有一条恢复成功，终态不变式仍成立
+      const [r3, r4] = await Promise.all([call(a.id, (await getCat(a.id)).data!.version), call(b.id, (await getCat(b.id)).data!.version)])
+      expect([r3.status, r4.status].filter((s) => s === 200).length).toBe(1)
+    }
+    expect(await activeCount()).toBe(1)
+  })
+})
+
 async function getCatByNameWithDeleted(name: string): Promise<CategoryDto> {
   const res = await listRoute.GET(reqFor(su, "GET", `/api/admin/v1/categories?includeDeleted=true&q=${encodeURIComponent(name)}`))
   return (await body<PageResult<CategoryDto>>(res)).data!.items[0]!

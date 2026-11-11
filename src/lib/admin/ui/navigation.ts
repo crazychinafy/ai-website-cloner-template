@@ -68,11 +68,11 @@ export const ADMIN_NAV: AdminNavTop[] = [
     icon: "folder",
     items: [
       { label: "网址分类", icon: "folder", href: "/admin/categories", permission: "categories.read" },
-      { label: "网址管理", icon: "link", permission: "links.read", pending: true },
+      { label: "网址管理", icon: "link", href: "/admin/links", permission: "links.read" },
       { label: "标签管理", icon: "tag", href: "/admin/tags", permission: "tags.read" },
-      { label: "文章管理", icon: "file-text", permission: "articles.read", pending: true },
+      { label: "文章管理", icon: "file-text", href: "/admin/articles", permission: "articles.read" },
       { label: "文章分类", icon: "folder-tree", href: "/admin/article-categories", permission: ARTICLE_CATEGORY_PERMISSION },
-      { label: "公告管理", icon: "megaphone", permission: "bulletins.read", pending: true },
+      { label: "公告管理", icon: "megaphone", href: "/admin/bulletins", permission: "bulletins.read" },
     ],
   },
   {
@@ -116,10 +116,13 @@ export function buildNav(permissions: string[]): AdminNavTop[] {
   return out
 }
 
-/** 全部已实现的页面路由（面包屑 / 高亮用；P6A 起含三个内容模块） */
+/** 全部已实现的页面路由（面包屑 / 高亮用；P6A 起含三个内容模块，P6B 起含网址管理，P6C 起含文章/公告） */
 export const ADMIN_PAGE_ROUTES: ReadonlySet<string> = new Set([
   "/admin",
   "/admin/categories",
   "/admin/article-categories",
+  "/admin/links",
   "/admin/tags",
+  "/admin/articles",
+  "/admin/bulletins",
 ])

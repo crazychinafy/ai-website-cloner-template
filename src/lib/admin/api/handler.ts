@@ -14,6 +14,8 @@ import type { WriteCtx } from "@/lib/admin/audit/audit-writer.ts"
 import type { AdminDb } from "@/lib/db/client"
 
 const MAX_BODY_BYTES = 64 * 1024
+/** P6C：文章/公告富文本路由的大请求体上限（正文 100k 字符 × JSON 转义膨胀 < 512KB） */
+export const MAX_BODY_BYTES_RICH = 512 * 1024
 
 export type RouteResult = { data: unknown; status?: number }
 
@@ -74,10 +76,11 @@ function csrfMatches(expected: string, provided: string | null): boolean {
   }
 }
 
-/** 解析并校验 JSON 请求体（Content-Type + 64KB 上限 + Zod） */
+/** 解析并校验 JSON 请求体（Content-Type + 上限 + Zod；上限可按路由放宽，见 MAX_BODY_BYTES_RICH） */
 export async function parseJsonBody<T>(
   req: Request,
   schema: z.ZodType<T>,
+  maxBytes: number = MAX_BODY_BYTES,
 ): Promise<{ ok: true; data: T } | { ok: false; response: Response }> {
   const ct = (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase()
   if (ct !== "application/json") {
@@ -86,7 +89,7 @@ export async function parseJsonBody<T>(
   let parsed: unknown
   try {
     const buf = await req.arrayBuffer()
-    if (buf.byteLength > MAX_BODY_BYTES) {
+    if (buf.byteLength > maxBytes) {
       return { ok: false, response: err("VALIDATION_ERROR", "请求体过大", { status: 422 }) }
     }
     parsed = JSON.parse(new TextDecoder().decode(buf))
@@ -98,20 +101,20 @@ export async function parseJsonBody<T>(
   return { ok: true, data: result.data }
 }
 
-/** 写操作完整管道：guard → JSON body（可选）→ Service */
+/** 写操作完整管道：guard → JSON body（可选）→ Service（opts.maxBytes 放宽富文本路由上限） */
 export async function handleWrite<TSchema>(
   req: Request,
   permission: string,
   ctxLabel: string,
   bodySchema: z.ZodType<TSchema> | null,
   fn: (admin: AdminIdentity, ctx: WriteCtx, body: TSchema) => Promise<RouteResult | unknown>,
-  db?: AdminDb,
+  opts?: { db?: AdminDb; maxBytes?: number },
 ): Promise<Response> {
-  const guard = await requireAdminForWrite(req, permission, db)
+  const guard = await requireAdminForWrite(req, permission, opts?.db)
   if (!guard.ok) return guard.response
   let body = undefined as unknown as TSchema
   if (bodySchema) {
-    const parsed = await parseJsonBody(req, bodySchema)
+    const parsed = await parseJsonBody(req, bodySchema, opts?.maxBytes)
     if (!parsed.ok) return parsed.response
     body = parsed.data
   }
