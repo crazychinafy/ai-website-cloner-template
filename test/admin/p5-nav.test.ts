@@ -1,12 +1,12 @@
-// P5 测试：导航权限矩阵（buildNav；权限集直接取 P2 Seed 字典语义）
-// 四个标准角色的权限集与 Seed 一致（super_admin=42 / content_admin=32 /
-// content_editor=22 / auditor=12）；此处用真实字典派生（import seed 常量不可行 →
+// P5 测试：导航权限矩阵（buildNav；权限集直接取 Seed 字典语义）
+// 四个标准角色的权限集与 Seed 一致（P6A 后 super_admin=46 / content_admin=36 /
+// content_editor=25 / auditor=13）；此处用真实字典派生（import seed 常量不可行 →
 // 在 p5-permissions.test.ts 用真实 DB 核对，本文件验证"过滤逻辑"本身）。
 import { describe, expect, it } from "vitest"
 import { ADMIN_NAV, buildNav, isNavGroup } from "../../src/lib/admin/ui/navigation"
 
 /** 用 Seed 标准角色权限集（与 scripts/admin/seed-rbac.ts 语义一致） */
-const CONTENT_RESOURCES = ["categories", "links", "articles", "bulletins", "ads", "tags", "lines"]
+const CONTENT_RESOURCES = ["categories", "article_categories", "links", "articles", "bulletins", "ads", "tags", "lines"]
 const ALL_PERMS = [
   "dashboard.read",
   ...CONTENT_RESOURCES.flatMap((r) => [
@@ -40,7 +40,7 @@ const permsFor = (role: "super_admin" | "content_admin" | "content_editor" | "au
       return ["dashboard.read", ...CONTENT_RESOURCES.flatMap((r) => [`${r}.read`, `${r}.create`, `${r}.update`])]
     case "auditor":
       return [
-        ...["dashboard", "categories", "links", "articles", "bulletins", "ads", "tags", "lines", "settings", "administrators", "audit_logs"].map((r) => `${r}.read`),
+        ...["dashboard", "categories", "article_categories", "links", "articles", "bulletins", "ads", "tags", "lines", "settings", "administrators", "audit_logs"].map((r) => `${r}.read`),
         "imports.preview",
       ]
   }

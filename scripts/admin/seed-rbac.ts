@@ -15,7 +15,7 @@ import type { MySql2Database } from "drizzle-orm/mysql2"
 import { eq } from "drizzle-orm"
 import { adminPermissions, adminRolePermissions, adminRoles } from "../../src/lib/db/schema/admin-rbac.ts"
 
-// ── 权限字典（42 条，覆盖 12 个资源）─────────────────────────────
+// ── 权限字典（46 条，覆盖 13 个资源；P6A 新增 article_categories）──
 type Perm = { code: string; name: string; resource: string; action: string }
 
 const PERMISSIONS: Perm[] = [
@@ -26,6 +26,11 @@ const PERMISSIONS: Perm[] = [
   { code: "categories.create", name: "新建网址分类", resource: "categories", action: "create" },
   { code: "categories.update", name: "编辑网址分类", resource: "categories", action: "update" },
   { code: "categories.delete", name: "删除网址分类", resource: "categories", action: "delete" },
+  // article_categories（4，P6A 新增：文章分类是独立资源）
+  { code: "article_categories.read", name: "查看文章分类", resource: "article_categories", action: "read" },
+  { code: "article_categories.create", name: "新建文章分类", resource: "article_categories", action: "create" },
+  { code: "article_categories.update", name: "编辑文章分类", resource: "article_categories", action: "update" },
+  { code: "article_categories.delete", name: "删除文章分类", resource: "article_categories", action: "delete" },
   // links（5）
   { code: "links.read", name: "查看网址", resource: "links", action: "read" },
   { code: "links.create", name: "新建网址", resource: "links", action: "create" },
@@ -78,7 +83,7 @@ const PERMISSIONS: Perm[] = [
 // ── 标准角色（4 个）──────────────────────────────────────────────
 type Role = { code: string; name: string; description: string; permissions: string[] }
 
-const CONTENT_RESOURCES = ["categories", "links", "articles", "bulletins", "ads", "tags", "lines"]
+const CONTENT_RESOURCES = ["categories", "article_categories", "links", "articles", "bulletins", "ads", "tags", "lines"]
 const allCodes = () => PERMISSIONS.map((p) => p.code)
 const codesFor = (resources: string[], actions?: string[]) =>
   PERMISSIONS.filter((p) => resources.includes(p.resource) && (!actions || actions.includes(p.action))).map(
@@ -111,7 +116,7 @@ const ROLES: Role[] = [
     description: "只读；含 imports.preview（dry-run 不写库，见安全文档 §11.4）（系统角色）",
     permissions: [
       ...codesFor(
-        ["dashboard", "categories", "links", "articles", "bulletins", "ads", "tags", "lines", "settings", "administrators", "audit_logs"],
+        ["dashboard", "categories", "article_categories", "links", "articles", "bulletins", "ads", "tags", "lines", "settings", "administrators", "audit_logs"],
         ["read"],
       ),
       "imports.preview",

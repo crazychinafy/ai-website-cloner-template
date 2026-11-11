@@ -175,6 +175,41 @@ export function adminPost<T>(
   )
 }
 
+/** P6A：PATCH（部分更新 / 状态切换 / 批量排序） */
+export function adminPatch<T>(
+  path: string,
+  body: unknown,
+  opts: AdminRequestOptions & { csrfToken: string },
+): Promise<AdminResult<T>> {
+  return request<T>(
+    path,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": opts.csrfToken,
+      },
+      body: JSON.stringify(body ?? {}),
+    },
+    opts,
+  )
+}
+
+/** P6A：DELETE（软删除；版本在调用方拼进查询串：path + `?version=`） */
+export function adminDelete<T>(
+  path: string,
+  opts: AdminRequestOptions & { csrfToken: string },
+): Promise<AdminResult<T>> {
+  return request<T>(
+    path,
+    {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": opts.csrfToken },
+    },
+    opts,
+  )
+}
+
 /** ── 认证域 API（P3 已实现，P5 统一接入）──────────────────── */
 
 export const adminApi = {

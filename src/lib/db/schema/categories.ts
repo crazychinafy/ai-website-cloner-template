@@ -5,7 +5,8 @@ import { bigint, boolean, datetime, foreignKey, index, int, mysqlEnum, mysqlTabl
 export const linkCategories = mysqlTable(
   "link_categories",
   {
-    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey(),
+    // P6A：BIGINT 主键启用 AUTO_INCREMENT（migration 0001）；静态快照仍显式写入原始 17/18 位 ID
+    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().autoincrement().primaryKey(),
     // 自引用外键放在表级约束（drizzle 列级 .references() 自引用在 strict 下类型循环，见 P2 报告）
     parentId: bigint("parent_id", { mode: "bigint", unsigned: true }),
     name: varchar("name", { length: 120 }).notNull(),
@@ -31,7 +32,8 @@ export const linkCategories = mysqlTable(
 export const articleCategories = mysqlTable(
   "article_categories",
   {
-    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey(),
+    // P6A：见 linkCategories 注释
+    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().autoincrement().primaryKey(),
     name: varchar("name", { length: 120 }).notNull(),
     iconClass: varchar("icon_class", { length: 255 }).notNull().default(""),
     sortOrder: int("sort_order").notNull().default(0),

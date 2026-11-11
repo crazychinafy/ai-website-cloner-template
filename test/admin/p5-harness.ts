@@ -1,6 +1,6 @@
 // P5 测试共享辅助（scratch 库 facai8_p5_test，与 P2/P3/P4 套件隔离）
 // - 复用 P3 的通用构造器（createTestAdmin / adminReq / cookieToken / adminCookie）
-// - setupP5Env：建库 + 迁移 + RBAC seed（42 权限 / 4 角色 / 108 映射）
+// - setupP5Env：建库 + 迁移 + RBAC seed（46 权限 / 4 角色 / 120 映射，P6A 后）
 import type { Pool } from "mysql2/promise"
 import { dropScratch, freshMigratedPool, makeDb, readCreds } from "./test-db"
 import { runSeedRbac } from "../../scripts/admin/seed-rbac"

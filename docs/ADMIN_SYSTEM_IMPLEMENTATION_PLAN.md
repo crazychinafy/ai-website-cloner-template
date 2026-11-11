@@ -203,13 +203,22 @@
 
 ## P6A：分类和标签
 
-- [ ] 网址分类两级树管理。
-- [ ] 父子关系校验。
-- [ ] 分类排序。
-- [ ] 分类停用/软删除。
-- [ ] 文章分类管理。
-- [ ] 标签管理。
-- [ ] 关联数据阻止危险删除。
+> **执行状态：已完成（2026-11-11），等待用户验收。** 要点：
+> 三个内容管理模块全部落地——`/admin/categories`（两级树：新建/编辑/移动、同级 ↑↓ 排序、停用一级级联停用其下二级、启用二级要求上级已启用、软删除与「含已删除」恢复、真实网址/子分类计数）、`/admin/article-categories`（平铺列表，独立资源，删除范围筛选）、`/admin/tags`（前景/背景色取色器 + HEX 输入 + 实时样式预览芯片）；全部复用 P5 的 DataTable/SearchToolbar/FormField/ConfirmDialog/Toast 与状态约定；
+> 架构按 Route → 认证+RBAC → Zod → Service → Repository → Drizzle/MySQL 分层，三资源各自独立 Service/Repository；**所有写操作在单一事务内完成且同事务写入审计行**（`category.*`/`article_category.*`/`tag.*` 动作，reorder 审计 resourceId 为 `root`/`global`）；乐观锁 `version` 冲突返回 409 `VERSION_CONFLICT`（「该记录已被其他管理员修改，请刷新后重新编辑」）；409 校验失败路径不写审计；
+> 删除保护覆盖含软删除引用：`CATEGORY_HAS_LINKS`/`CATEGORY_HAS_CHILDREN`/`CATEGORY_RESTORE_BLOCKED`（二级须待一级先恢复）/`ARTICLE_CATEGORY_HAS_ARTICLES`/`TAG_HAS_LINKS`，内容表无物理 DELETE；新增 `article_categories.{read,create,update,delete}` 4 权限，总 46 权限/120 角色映射（super=46、content_admin=36、content_editor=25、auditor=13），seed 幂等；
+> 迁移 `0001_spotty_lord_tyger.sql` 将 `link_categories`/`article_categories`/`site_tags` 主键 id 改为 `AUTO_INCREMENT`（`SET FOREIGN_KEY_CHECKS` 包裹，journal idx 1），新建行 id = 雪花最大值+1（实机验证），前台数据不动；
+> 测试：全量 `npm run test:admin` **29 文件 / 328 用例全绿**（P0–P5 基线 207 + P6A 新增 121，真实 MySQL scratch 库）；lint 0 告警、typecheck、build 全绿；`admin:import:verify` 对 `facai8_p5_dev` 13 表 + 派生视图字段差异=0（details/mirrors 顺序差异为既定已知限制）；
+> 前台零回归：6 条前台路由 200；`src/lib/facai8/data` 20 个静态文件 SHA-256 与基线 20/20 一致；`src/lib/facai8`、`public`、`globals.css`、`layout.tsx` git diff 为空；
+> 实机走查（浏览器，`facai8_p5_dev` 导入 4182 行快照）：三模块创建（新 id = max+1 证明 AUTO_INCREMENT 生效）、编辑乐观锁版本递增、停用/启用级联与拦截 toast、排序交换、四类删除保护 toast 文案、软删除→含已删除→（先父后子）恢复全链路、缺 CSRF 头 403 `CSRF_INVALID`、过期 version 409 `VERSION_CONFLICT` 且库内数据未变；`admin_audit_logs` 实得 26 条与操作一一对应、409 路径 0 写入；截图 `docs/design-references/p6a-{categories-list,categories-restore,article-categories,tags}.jpg`。
+
+- [x] 网址分类两级树管理。
+- [x] 父子关系校验。
+- [x] 分类排序。
+- [x] 分类停用/软删除。
+- [x] 文章分类管理。
+- [x] 标签管理。
+- [x] 关联数据阻止危险删除。
 
 验收：分类页、标签页 CRUD、权限、审计、并发冲突、前台分类显示回归通过。
 

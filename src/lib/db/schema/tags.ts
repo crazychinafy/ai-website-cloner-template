@@ -6,7 +6,8 @@ import { bigint, datetime, index, int, mysqlEnum, mysqlTable, varchar } from "dr
 export const siteTags = mysqlTable(
   "site_tags",
   {
-    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey(),
+    // P6A：见 link_categories 注释；本表无 updated_at（以实际 migration 为准）
+    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().autoincrement().primaryKey(),
     name: varchar("name", { length: 100 }).notNull(),
     iconClass: varchar("icon_class", { length: 255 }).notNull().default(""),
     color: varchar("color", { length: 32 }).notNull().default("#000000"),

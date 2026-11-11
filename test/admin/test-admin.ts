@@ -66,7 +66,7 @@ export async function setupP3Env(): Promise<P3Env> {
   pointAppAtScratch()
   const pool = await freshMigratedPool(P3_SCRATCH)
   // seed 走 P2 的无 schema 工厂（runSeedRbac 的参数类型是 Record<string,never>）
-  await runSeedRbac(makeDb(pool)) // 幂等：42 权限 / 4 角色 / 108 映射
+  await runSeedRbac(makeDb(pool)) // 幂等：46 权限 / 4 角色 / 120 映射（P6A 后）
   const db = makeAppDb(pool)
   return { pool, db }
 }

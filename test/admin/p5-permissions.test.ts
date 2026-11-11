@@ -52,12 +52,12 @@ async function getSession(cookie: string) {
 }
 
 describe("P5 RBAC × UI 权限矩阵（真实 DB 核对）", () => {
-  it("1. 四个标准角色 Session 权限数 = 42/32/22/12（与 P2 Seed 字典一致）", async () => {
+  it("1. 四个标准角色 Session 权限数 = 46/36/25/13（与 Seed 字典一致，P6A 后）", async () => {
     const cases: Array<[string, string, number]> = [
-      ["p5_super", "super_admin", 42],
-      ["p5_content", "content_admin", 32],
-      ["p5_editor", "content_editor", 22],
-      ["p5_auditor", "auditor", 12],
+      ["p5_super", "super_admin", 46],
+      ["p5_content", "content_admin", 36],
+      ["p5_editor", "content_editor", 25],
+      ["p5_auditor", "auditor", 13],
     ]
     for (const [user, role, n] of cases) {
       const id = await getSession(await loginCookie(user))

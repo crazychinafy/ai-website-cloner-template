@@ -47,12 +47,12 @@ const getIdentity = async (cookie: string) => {
 }
 
 describe("RBAC 角色权限（与 P2 Seed 字典核对）", () => {
-  it("1. 四个标准角色的权限数量与字典一致（42/32/22/12）", async () => {
+  it("1. 四个标准角色的权限数量与字典一致（46/36/25/13，P6A 后）", async () => {
     const cases: Array<[string, string, number]> = [
-      ["role_super", "super_admin", 42],
-      ["role_content_admin", "content_admin", 32],
-      ["role_editor", "content_editor", 22],
-      ["role_auditor", "auditor", 12],
+      ["role_super", "super_admin", 46],
+      ["role_content_admin", "content_admin", 36],
+      ["role_editor", "content_editor", 25],
+      ["role_auditor", "auditor", 13],
     ]
     for (const [user, role, n] of cases) {
       const id = await getIdentity(await loginCookie(user))

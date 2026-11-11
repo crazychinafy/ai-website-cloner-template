@@ -1,10 +1,10 @@
 // P5：后台导航树（纯函数模块，服务端/客户端通用，无副作用）
 // ─────────────────────────────────────────────────────────────────
-// - 权限代码全部来自 P2 Seed 字典（42 条 / 12 资源），禁止自行编造：
-//   dashboard / categories / links / articles / bulletins / ads / tags /
-//   lines / settings / administrators / audit_logs / imports
-// - P5 只实现"工作台"页面；其余模块为未来 P6A-P7 规划，
-//   显示为"待开放"（pending，不可点击、不产生死链），不伪造功能。
+// - 权限代码全部来自 Seed 字典（P6A 后 46 条 / 13 资源），禁止自行编造：
+//   dashboard / categories / article_categories / links / articles / bulletins /
+//   ads / tags / lines / settings / administrators / audit_logs / imports
+// - P5 实现"工作台"；P6A 实现网址分类/文章分类/标签管理；其余模块为
+//   未来 P6B-P7 规划，显示为"待开放"（pending，不可点击、不产生死链），不伪造功能。
 // - 菜单可见性由 buildNav(permissions) 依据 Session 实时权限过滤，
 //   仅用于展示；服务端守卫（guards/require-permission）是唯一安全边界。
 
@@ -52,10 +52,9 @@ export function isNavGroup(node: AdminNavTop): node is AdminNavGroup {
   return Array.isArray((node as AdminNavGroup).items)
 }
 
-// 文章分类：Seed 权限字典中没有独立的 article_categories 权限码
-// （`categories.*` 由 P2 定义为"网址分类"）。P5 按 categories 资源可见性
-// 显示该菜单；P6A 实施时如拆分权限码，须同步调整此处映射。
-export const ARTICLE_CATEGORY_PERMISSION = "categories.read"
+// P6A：文章分类成为独立资源（article_categories.* 权限码，Seed 已含 4 条）。
+// 导航项直接使用该权限码；旧版借用 categories.read 的映射已废弃。
+export const ARTICLE_CATEGORY_PERMISSION = "article_categories.read"
 
 export const ADMIN_NAV: AdminNavTop[] = [
   {
@@ -68,11 +67,11 @@ export const ADMIN_NAV: AdminNavTop[] = [
     label: "内容管理",
     icon: "folder",
     items: [
-      { label: "网址分类", icon: "folder", permission: "categories.read", pending: true },
+      { label: "网址分类", icon: "folder", href: "/admin/categories", permission: "categories.read" },
       { label: "网址管理", icon: "link", permission: "links.read", pending: true },
-      { label: "标签管理", icon: "tag", permission: "tags.read", pending: true },
+      { label: "标签管理", icon: "tag", href: "/admin/tags", permission: "tags.read" },
       { label: "文章管理", icon: "file-text", permission: "articles.read", pending: true },
-      { label: "文章分类", icon: "folder-tree", permission: ARTICLE_CATEGORY_PERMISSION, pending: true },
+      { label: "文章分类", icon: "folder-tree", href: "/admin/article-categories", permission: ARTICLE_CATEGORY_PERMISSION },
       { label: "公告管理", icon: "megaphone", permission: "bulletins.read", pending: true },
     ],
   },
@@ -117,5 +116,10 @@ export function buildNav(permissions: string[]): AdminNavTop[] {
   return out
 }
 
-/** 全部已实现的页面路由（面包屑 / 高亮用） */
-export const ADMIN_PAGE_ROUTES: ReadonlySet<string> = new Set(["/admin"])
+/** 全部已实现的页面路由（面包屑 / 高亮用；P6A 起含三个内容模块） */
+export const ADMIN_PAGE_ROUTES: ReadonlySet<string> = new Set([
+  "/admin",
+  "/admin/categories",
+  "/admin/article-categories",
+  "/admin/tags",
+])

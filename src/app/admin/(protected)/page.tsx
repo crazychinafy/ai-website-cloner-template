@@ -170,7 +170,7 @@ export default async function AdminHomePage() {
                 <span className="ml-1 text-xs font-normal text-muted-foreground">名管理员</span>
               </p>
               <p className="text-xs leading-5 text-muted-foreground">
-                角色 {scale.roles} 个（含 4 个系统角色）· 权限 42 项
+                角色 {scale.roles} 个（含 4 个系统角色）· 权限 46 项
               </p>
             </>
           ) : (

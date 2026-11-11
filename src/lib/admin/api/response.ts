@@ -16,6 +16,21 @@ export type AdminErrorCode =
   | "RATE_LIMITED"
   | "NOT_FOUND"
   | "INTERNAL_ERROR"
+  // P6A：内容管理业务错误码（分类/文章分类/标签；409 类为主，前端按 code 精确提示）
+  | "VERSION_CONFLICT"
+  | "CATEGORY_NOT_FOUND"
+  | "CATEGORY_HAS_LINKS"
+  | "CATEGORY_HAS_CHILDREN"
+  | "CATEGORY_PARENT_NOT_FOUND"
+  | "CATEGORY_PARENT_NOT_LEVEL_ONE"
+  | "CATEGORY_CYCLE"
+  | "CATEGORY_RESTORE_BLOCKED"
+  | "ARTICLE_CATEGORY_NOT_FOUND"
+  | "ARTICLE_CATEGORY_HAS_ARTICLES"
+  | "TAG_NOT_FOUND"
+  | "TAG_HAS_LINKS"
+  | "REORDER_SCOPE_MISMATCH"
+  | "REORDER_DUPLICATE"
 
 export function ok(data: unknown, init?: { status?: number; headers?: Record<string, string> }): Response {
   return Response.json(

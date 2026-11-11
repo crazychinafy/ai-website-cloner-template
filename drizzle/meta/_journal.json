@@ -8,6 +8,13 @@
       "when": 1794285557944,
       "tag": "0000_fair_magdalene",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1794382354301,
+      "tag": "0001_spotty_lord_tyger",
+      "breakpoints": true
     }
   ]
 }

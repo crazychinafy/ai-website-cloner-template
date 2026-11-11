@@ -186,6 +186,11 @@ seed：
 - 运行 lint/typecheck/build。
 - 回归相关前台路由。
 不得直接拼接 SQL 标识符；sortBy 使用 allowlist。所有值参数化。
+P6A 实测坑（已验证的解决方案，后续模块沿用）：
+- Drizzle `sql\`\`` 片段里的相关子查询计数列必须用 `sql.raw("\`table\`.\`col\`")` 显式限定表名，否则 `${table.id}` 渲染成不带表前缀的列名，嵌套 JOIN 下计数静默错误。
+- 把雪花 id 列改为 AUTO_INCREMENT 的迁移需用 `SET FOREIGN_KEY_CHECKS = 0/1` 包裹（存在 FK 引用时 MySQL 拒绝 MODIFY 主键类型/属性变更）；drizzle migrator 会在同一连接顺序执行，包裹有效。
+- Drizzle `json()` 列读回已是解析后的对象（测试与脚本里不要 `JSON.parse` 再包一层）；MySQL 控制台 GBK 环境打印中文会乱码，但库内与文件仍是 UTF-8，以文件/驱动层断言为准。
+- 软删除资源的恢复必须按依赖排序（两级树先恢复一级），409 校验失败路径不写审计行；删除保护计数需 `EXISTS/含已删除` 口径与前台一致。
 
 ### Phase 7 — 仪表盘、审计、导入 UI
 - 仪表盘只展示真实可得的数据总数、最近修改、导入状态和系统健康；没有访问分析时不得虚构 PV/UV。

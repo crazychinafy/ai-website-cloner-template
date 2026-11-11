@@ -81,7 +81,7 @@ describe("Session 会话管理", () => {
     expect(json.data.id).toMatch(/^\d+$/) // BIGINT 字符串
     expect(json.data.roles).toEqual(["super_admin"])
     expect(json.data.permissions).toContain("dashboard.read")
-    expect(json.data.permissions.length).toBe(42) // super_admin = 全部权限
+    expect(json.data.permissions.length).toBe(46) // super_admin = 全部权限（P6A 后 46 条）
     expect(json.data.mustChangePassword).toBe(false)
     expect(json.data.csrfToken.length).toBeGreaterThan(0)
     expect(json.data.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/)

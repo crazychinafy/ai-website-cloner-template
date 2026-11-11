@@ -42,3 +42,15 @@ export async function guardLoginPage(): Promise<AdminIdentity | null> {
   if (!admin) return null
   redirect(admin.mustChangePassword ? "/admin/change-password" : "/admin")
 }
+
+/**
+ * P6A：页面级权限守卫（业务页面用）。
+ * - 先过 requireAdminPage（登录 / 强制改密检查）
+ * - 权限不足 → redirect /admin/forbidden（ForbiddenState 落地页）
+ * - 仅为 UX 优化：API 层的 requirePermission 才是安全边界（页面 + API 双重守卫）
+ */
+export async function requireAdminPagePermission(permission: string): Promise<AdminIdentity> {
+  const admin = await requireAdminPage()
+  if (!admin.permissions.includes(permission)) redirect("/admin/forbidden")
+  return admin
+}

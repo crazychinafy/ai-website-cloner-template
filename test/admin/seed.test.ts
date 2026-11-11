@@ -24,23 +24,23 @@ afterAll(async () => {
 })
 
 describe("seed 角色权限", () => {
-  it("首次 seed：42 权限 / 4 角色 / 108 映射，数量与文档一致", async () => {
+  it("首次 seed：46 权限 / 4 角色 / 120 映射，数量与文档一致（P6A 新增 article_categories 4 条）", async () => {
     const db = makeDb(pool)
     const report = await runSeedRbac(db)
-    expect(report.permissions).toBe(42)
+    expect(report.permissions).toBe(46)
     expect(report.roles).toBe(4)
     expect(report.rolePermissions).toEqual({
-      super_admin: 42,
-      content_admin: 32,
-      content_editor: 22,
-      auditor: 12,
+      super_admin: 46,
+      content_admin: 36,
+      content_editor: 25,
+      auditor: 13,
     })
-    expect(await count("SELECT COUNT(*) AS n FROM admin_role_permissions")).toBe(108)
+    expect(await count("SELECT COUNT(*) AS n FROM admin_role_permissions")).toBe(120)
   })
 
-  it("权限 code 唯一且覆盖 12 个资源", async () => {
-    expect(await count("SELECT COUNT(*) AS n FROM admin_permissions")).toBe(42)
-    expect(await count("SELECT COUNT(DISTINCT code) AS n FROM admin_permissions")).toBe(42)
+  it("权限 code 唯一且覆盖 13 个资源", async () => {
+    expect(await count("SELECT COUNT(*) AS n FROM admin_permissions")).toBe(46)
+    expect(await count("SELECT COUNT(DISTINCT code) AS n FROM admin_permissions")).toBe(46)
     const [rows] = await (pool as Any).query(
       "SELECT resource, COUNT(*) AS n FROM admin_permissions GROUP BY resource ORDER BY resource",
     )
@@ -48,6 +48,7 @@ describe("seed 角色权限", () => {
     expect(res).toEqual(
       [
         "ads",
+        "article_categories",
         "articles",
         "audit_logs",
         "categories",
@@ -66,15 +67,15 @@ describe("seed 角色权限", () => {
   it("第二次 seed 不产生重复、不改映射（幂等）", async () => {
     const db = makeDb(pool)
     const report = await runSeedRbac(db)
-    expect(report.permissions).toBe(42)
+    expect(report.permissions).toBe(46)
     expect(report.roles).toBe(4)
     expect(report.rolePermissions).toEqual({
-      super_admin: 42,
-      content_admin: 32,
-      content_editor: 22,
-      auditor: 12,
+      super_admin: 46,
+      content_admin: 36,
+      content_editor: 25,
+      auditor: 13,
     })
-    expect(await count("SELECT COUNT(*) AS n FROM admin_role_permissions")).toBe(108)
+    expect(await count("SELECT COUNT(*) AS n FROM admin_role_permissions")).toBe(120)
   })
 
   it("auditor 无任何写权限（只读 + imports.preview）", async () => {
@@ -87,7 +88,7 @@ describe("seed 角色权限", () => {
       .where(eq(schema.adminRoles.code, "auditor"))
     const actions = rows.map((r) => r.action)
     expect(actions.sort()).toEqual(
-      ["read", "read", "read", "read", "read", "read", "read", "read", "read", "read", "read", "preview"].sort(),
+      ["read", "read", "read", "read", "read", "read", "read", "read", "read", "read", "read", "read", "preview"].sort(),
     )
     expect(actions).not.toContain("create")
     expect(actions).not.toContain("update")
@@ -110,7 +111,7 @@ describe("seed 角色权限", () => {
     for (const banned of ["publish", "delete", "disable", "assign_role", "execute"]) {
       expect(actions).not.toContain(banned)
     }
-    expect(actions.filter((a) => a === "read")).toHaveLength(8) // dashboard + 7 内容资源
+    expect(actions.filter((a) => a === "read")).toHaveLength(9) // dashboard + 8 内容资源（P6A 含 article_categories）
   })
 
   it("content_admin 无管理员/设置/导入权限", async () => {
