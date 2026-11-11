@@ -16,6 +16,38 @@ export function asExecutor(db: Executor): Executor {
   return db
 }
 
+/** 沿 cause 链找 MySQL 驱动错误码（drizzle 0.45 用 DrizzleQueryError 包裹原始错误在 cause 上） */
+function findMySqLError(e: unknown): { code?: unknown; errno?: unknown } | null {
+  let cur: unknown = e
+  for (let depth = 0; depth < 6 && cur !== null && typeof cur === "object"; depth++) {
+    const err = cur as { code?: unknown; errno?: unknown; cause?: unknown }
+    if (typeof err.code === "string" || typeof err.errno === "number") return err
+    cur = err.cause
+  }
+  return null
+}
+
+/**
+ * MySQL 唯一索引冲突（ER_DUP_ENTRY / errno 1062）。
+ * P6A.1：Service 在写调用处捕获它并映射为业务错误（422 名称冲突 / 409 恢复冲突），
+ * SQL 异常本身绝不透出到客户端。
+ */
+export function isDuplicateKeyError(e: unknown): boolean {
+  const err = findMySqLError(e)
+  return err !== null && (err.code === "ER_DUP_ENTRY" || err.errno === 1062)
+}
+
+/**
+ * InnoDB 死锁牺牲品（ER_LOCK_DEADLOCK / errno 1213）。
+ * 两条并发事务同时向 UNIQUE 索引写入同名 key 时，duplicate-check 的 S/X 锁互等
+ * 会触发死锁，败者以此码回滚——语义等同「竞态输了」，与 ER_DUP_ENTRY 映射同一业务错误。
+ */
+export function isUniqueRaceError(e: unknown): boolean {
+  const err = findMySqLError(e)
+  if (!err) return false
+  return err.code === "ER_DUP_ENTRY" || err.errno === 1062 || err.code === "ER_LOCK_DEADLOCK" || err.errno === 1213
+}
+
 /** 事务内取回自增主键：insertId 走 JS number，>2^53 的 BIGINT 会丢精度；
  *  必须用连接级 LAST_INSERT_ID()（文本协议 + bigNumberStrings → 精确十进制字符串） */
 export async function lastInsertIdString(tx: AdminTx): Promise<string> {

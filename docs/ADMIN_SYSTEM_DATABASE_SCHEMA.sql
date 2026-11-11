@@ -101,6 +101,11 @@ CREATE TABLE link_categories (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) NULL,
+  -- P6A.1：软删除唯一名称的数据库层防线（STORED 生成列 + UNIQUE，见 migration 0002）。
+  -- parent_scope_id：根分类哨兵 0；active_name：deleted_at IS NULL 时取 name，否则 NULL（NULL 不参与 UNIQUE）
+  parent_scope_id BIGINT UNSIGNED GENERATED ALWAYS AS (CASE WHEN parent_id IS NULL THEN 0 ELSE parent_id END) STORED,
+  active_name VARCHAR(120) GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN name ELSE NULL END) STORED,
+  UNIQUE KEY uq_link_categories_active_name (parent_scope_id, active_name),
   KEY idx_link_categories_parent_sort (parent_id, status, sort_order),
   CONSTRAINT fk_link_categories_parent FOREIGN KEY (parent_id) REFERENCES link_categories(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
@@ -115,6 +120,9 @@ CREATE TABLE article_categories (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) NULL,
+  -- P6A.1：见 link_categories 注释；文章分类名称全局唯一（未删除行）
+  active_name VARCHAR(120) GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN name ELSE NULL END) STORED,
+  UNIQUE KEY uq_article_categories_active_name (active_name),
   KEY idx_article_categories_status_sort (status, sort_order)
 ) ENGINE=InnoDB;
 
@@ -129,6 +137,9 @@ CREATE TABLE site_tags (
   version INT UNSIGNED NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   deleted_at DATETIME(3) NULL,
+  -- P6A.1：见 link_categories 注释；标签名称全局唯一（未删除行）
+  active_name VARCHAR(100) GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN name ELSE NULL END) STORED,
+  UNIQUE KEY uq_site_tags_active_name (active_name),
   KEY idx_site_tags_status_sort (status, sort_order)
 ) ENGINE=InnoDB;
 

@@ -1,11 +1,13 @@
 // P6A：文章分类 Service（article_categories 独立资源；模式与 category-service 一致）
 // 删除保护：分类下的文章（含软删除）> 0 → 拒绝。全局排序（无父级作用域）。
+// P6A.1：恢复前复查同名冲突（409 ARTICLE_CATEGORY_NAME_CONFLICT）；创建/改名/恢复竞态由
+// uq_article_categories_active_name 兜底，ER_DUP_ENTRY 映射为业务错误。
 import "server-only"
 import { ContentError, versionConflict } from "../validation/content-error.ts"
 import type { WriteCtx } from "../audit/audit-writer.ts"
 import { writeAudit } from "../audit/audit-writer.ts"
 import { getDrizzle, type AdminDb } from "@/lib/db/client"
-import { asExecutor } from "../repositories/executor.ts"
+import { asExecutor, isUniqueRaceError } from "../repositories/executor.ts"
 import * as repo from "../repositories/article-category-repository.ts"
 import type {
   ArticleCategoryListQuery,
@@ -39,12 +41,19 @@ export async function createArticleCategory(
     const conflict = await repo.findArticleCategoryNameConflict(asExecutor(tx), input.name)
     if (conflict) throw nameConflict()
     const sortOrder = input.sortOrder ?? (await repo.maxArticleCategorySortOrder(asExecutor(tx))) + 1
-    const id = await repo.insertArticleCategory(tx, {
-      name: input.name,
-      iconClass: input.iconClass ?? "",
-      sortOrder,
-      status: input.status ?? "active",
-    })
+    let id: string
+    try {
+      id = await repo.insertArticleCategory(tx, {
+        name: input.name,
+        iconClass: input.iconClass ?? "",
+        sortOrder,
+        status: input.status ?? "active",
+      })
+    } catch (e) {
+      // 并发同名竞态 → uq_article_categories_active_name 兜底（422 与预检查路径同契约）
+      if (isUniqueRaceError(e)) throw nameConflict()
+      throw e
+    }
     const record = await repo.getArticleCategoryById(asExecutor(tx), id)
     if (!record) throw new ContentError(500, "INTERNAL_ERROR", "文章分类创建后读取失败")
     await writeAudit(tx, ctx, {
@@ -79,7 +88,13 @@ export async function updateArticleCategory(
     if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder
     if (input.status !== undefined) patch.status = input.status
 
-    const ok = await repo.updateArticleCategoryWithVersion(tx, id, input.version, patch)
+    let ok: boolean
+    try {
+      ok = await repo.updateArticleCategoryWithVersion(tx, id, input.version, patch)
+    } catch (e) {
+      if (isUniqueRaceError(e)) throw nameConflict()
+      throw e
+    }
     if (!ok) throw versionConflict()
     const record = await repo.getArticleCategoryById(asExecutor(tx), id)
     if (!record) throw notFound()
@@ -203,7 +218,17 @@ export async function restoreArticleCategory(
     if (!current) throw notFound()
     if (!current.deletedAt) throw new ContentError(422, "VALIDATION_ERROR", "该分类未被删除，无需恢复")
     if (version !== current.version) throw versionConflict()
-    const ok = await repo.restoreArticleCategory(tx, id, version)
+    // P6A.1：恢复前复查全局同名（软删除期间同名分类可能已被新建）→ 409 业务冲突
+    const conflict = await repo.findArticleCategoryNameConflict(asExecutor(tx), current.name, id)
+    if (conflict) throw restoreNameConflict(current.name)
+    let ok: boolean
+    try {
+      ok = await repo.restoreArticleCategory(tx, id, version)
+    } catch (e) {
+      // 并发恢复/新建竞态 → uq_article_categories_active_name 兜底
+      if (isUniqueRaceError(e)) throw restoreNameConflict(current.name)
+      throw e
+    }
     if (!ok) throw versionConflict()
     const record = await repo.getArticleCategoryById(asExecutor(tx), id)
     if (!record) throw notFound()
@@ -224,4 +249,11 @@ function notFound(): ContentError {
 
 function nameConflict(): ContentError {
   return new ContentError(422, "VALIDATION_ERROR", "文章分类名称已存在", { name: "文章分类名称已存在" })
+}
+
+/** P6A.1：恢复时名称已被占用（预检查命中或 UNIQUE 索引竞态兜底） */
+function restoreNameConflict(name: string): ContentError {
+  return new ContentError(409, "ARTICLE_CATEGORY_NAME_CONFLICT", `同名文章分类「${name}」已存在，无法恢复`, {
+    name: `同名文章分类「${name}」已存在，无法恢复`,
+  })
 }

@@ -142,20 +142,42 @@ export async function findCategoryNameConflict(
   return rows[0] ? rows[0].id.toString() : null
 }
 
-/** 父级存在性/层级检查用（返回任意删除状态的精简行） */
+/** 父级存在性/层级检查用（返回任意删除状态的精简行；version 供删除/恢复乐观锁复用） */
 export async function getCategoryBrief(
   exec: Executor,
   id: string,
-): Promise<{ id: string; name: string; parentId: string | null; status: "active" | "disabled"; deletedAt: string | null } | null> {
+): Promise<{ id: string; name: string; parentId: string | null; status: "active" | "disabled"; version: number; deletedAt: string | null } | null> {
   const db = asExecutor(exec)
   const rows = await db
-    .select({ id: linkCategories.id, name: linkCategories.name, parentId: linkCategories.parentId, status: linkCategories.status, deletedAt: linkCategories.deletedAt })
+    .select({ id: linkCategories.id, name: linkCategories.name, parentId: linkCategories.parentId, status: linkCategories.status, version: linkCategories.version, deletedAt: linkCategories.deletedAt })
     .from(linkCategories)
     .where(eq(linkCategories.id, BigInt(id)))
     .limit(1)
   const r = rows[0]
   if (!r) return null
-  return { id: r.id.toString(), name: r.name, parentId: idToString(r.parentId), status: r.status, deletedAt: r.deletedAt ?? null }
+  return { id: r.id.toString(), name: r.name, parentId: idToString(r.parentId), status: r.status, version: r.version, deletedAt: r.deletedAt ?? null }
+}
+
+export type CategoryBrief = NonNullable<Awaited<ReturnType<typeof getCategoryBrief>>>
+
+/**
+ * P6A.1：写路径的父级行锁（SELECT ... FOR UPDATE）。
+ * - 锁定读取永远看到最新已提交行（不受 RR 快照影响），并阻塞并发的停用/删除/移动，
+ *   关闭「检查后到写入前」父级状态被改的 TOCTOU 竞态
+ * - 锁序约定：所有写事务先锁父级行，再锁自身/子级行（create/move/restore/enable 同序，避免死锁）
+ * - 仅在事务内调用（池上 SELECT ... FOR UPDATE 会立即释放，无保护语义）
+ */
+export async function lockCategoryBriefForUpdate(exec: Executor, id: string): Promise<CategoryBrief | null> {
+  const db = asExecutor(exec)
+  const rows = await db
+    .select({ id: linkCategories.id, name: linkCategories.name, parentId: linkCategories.parentId, status: linkCategories.status, version: linkCategories.version, deletedAt: linkCategories.deletedAt })
+    .from(linkCategories)
+    .where(eq(linkCategories.id, BigInt(id)))
+    .limit(1)
+    .for("update")
+  const r = rows[0]
+  if (!r) return null
+  return { id: r.id.toString(), name: r.name, parentId: idToString(r.parentId), status: r.status, version: r.version, deletedAt: r.deletedAt ?? null }
 }
 
 /** 作用域内当前最大 sortOrder（新建默认追加到末尾） */

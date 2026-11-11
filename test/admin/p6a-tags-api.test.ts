@@ -511,3 +511,96 @@ describe("P6A 标签：审计", () => {
     }
   })
 })
+
+// ── P6A.1 缺陷修复回归（缺陷2：恢复名称冲突 + 数据库层防线）──────────────
+describe("P6A.1 标签：恢复名称冲突（缺陷回归）", () => {
+  async function deleteTag(id: string): Promise<Response> {
+    const cur = (await getTag(id)).data!
+    return itemRoute.DELETE(reqFor(su, "DELETE", `/api/admin/v1/tags/${id}?version=${cur.version}`, undefined), ctxOf(id))
+  }
+
+  it("A) 软删除期间同名已被新建 → 恢复 409 TAG_NAME_CONFLICT；清障后重试 → 200", async () => {
+    const made = await createTag("p6a1_标签同名恢复")
+    const id = made.json.data!.id
+    expect((await deleteTag(id)).status).toBe(200)
+    // 名称让出 → 新建同名成功（预检查 + uq_site_tags_active_name 均放行）
+    const blocker = await createTag("p6a1_标签同名恢复")
+    expect(blocker.res.status).toBe(200)
+
+    const deleted = await getTagWithDeleted(id)
+    let res = await restoreRoute.POST(reqFor(su, "POST", `/api/admin/v1/tags/${id}/restore`, { version: deleted.version }), ctxOf(id))
+    expect(res.status).toBe(409)
+    const j = await body<never>(res)
+    expect(j.error?.code).toBe("TAG_NAME_CONFLICT")
+    expect(j.error?.message).toContain("p6a1_标签同名恢复")
+    expect(j.error?.fields?.name).toBeTruthy() // 响应结构统一：fields 带原因
+
+    expect((await deleteTag(blocker.json.data!.id)).status).toBe(200)
+    const after = await getTagWithDeleted(id)
+    res = await restoreRoute.POST(reqFor(su, "POST", `/api/admin/v1/tags/${id}/restore`, { version: after.version }), ctxOf(id))
+    expect(res.status).toBe(200)
+    expect((await body<TagDto>(res)).data!.deletedAt).toBeNull()
+  })
+
+  it("B) 两条同名软删除行可共存；并发恢复 → 终态恰好一条未删除（UNIQUE 兜底，SQL 异常不透出）", async () => {
+    const a = (await createTag("p6a1_标签并发恢复")).json.data!
+    expect((await deleteTag(a.id)).status).toBe(200)
+    const b = (await createTag("p6a1_标签并发恢复")).json.data! // 软删除让出名称 → 同名再建
+    expect((await deleteTag(b.id)).status).toBe(200)
+    // 两条 deleted 行同时存在（生成列 NULL 不参与 UNIQUE）
+    const rows = await rawQuery<{ n: number }>(
+      env.pool,
+      "SELECT COUNT(*) AS n FROM site_tags WHERE name = ? AND deleted_at IS NOT NULL",
+      ["p6a1_标签并发恢复"],
+    )
+    expect(Number(rows[0]!.n)).toBe(2)
+
+    const activeCount = async (): Promise<number> => {
+      const r = await rawQuery<{ n: number }>(
+        env.pool,
+        "SELECT COUNT(*) AS n FROM site_tags WHERE name = ? AND deleted_at IS NULL",
+        ["p6a1_标签并发恢复"],
+      )
+      return Number(r[0]!.n)
+    }
+    const call = (id: string, v: number) =>
+      restoreRoute.POST(reqFor(su, "POST", `/api/admin/v1/tags/${id}/restore`, { version: v }), ctxOf(id))
+
+    const [r1, r2] = await Promise.all([
+      call(a.id, (await getTagWithDeleted(a.id)).version),
+      call(b.id, (await getTagWithDeleted(b.id)).version),
+    ])
+    for (const r of [r1, r2]) {
+      if (r.status !== 200) expect(r.status).toBe(409) // 竞态失败也是业务 409，绝不 500
+      if (r.status === 409) {
+        const j = await body<never>(r)
+        expect(["TAG_NAME_CONFLICT", "VERSION_CONFLICT"]).toContain(j.error?.code)
+      }
+    }
+    const wins = [r1, r2].filter((r) => r.status === 200).length
+    expect(wins).toBeLessThanOrEqual(1)
+    expect(await activeCount()).toBe(wins)
+
+    if (wins === 0) {
+      // 死锁回滚 + purge 延迟幽灵记录的合法结局：管理员再点一次即可
+      const [r3, r4] = await Promise.all([
+        call(a.id, (await getTagWithDeleted(a.id)).version),
+        call(b.id, (await getTagWithDeleted(b.id)).version),
+      ])
+      expect([r3.status, r4.status].filter((s) => s === 200).length).toBe(1)
+    }
+    expect(await activeCount()).toBe(1) // 数据库不变式：同名只有一条未删除
+  })
+
+  it("C) 软删除让出名称：同名 create 200；version 过期时恢复仍先报 VERSION_CONFLICT", async () => {
+    const made = await createTag("p6a1_标签版本优先")
+    const id = made.json.data!.id
+    expect((await deleteTag(id)).status).toBe(200)
+    expect((await createTag("p6a1_标签版本优先")).res.status).toBe(200)
+
+    const deleted = await getTagWithDeleted(id)
+    const res = await restoreRoute.POST(reqFor(su, "POST", `/api/admin/v1/tags/${id}/restore`, { version: deleted.version + 100 }), ctxOf(id))
+    expect(res.status).toBe(409)
+    expect((await body<never>(res)).error?.code).toBe("VERSION_CONFLICT")
+  })
+})
