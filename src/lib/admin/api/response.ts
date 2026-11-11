@@ -43,6 +43,12 @@ export type AdminErrorCode =
   | "LINK_MIRROR_MISMATCH"
   | "LINK_MIRROR_DUPLICATE"
   | "TAG_NOT_USABLE"
+  // P6C：文章/公告管理业务错误码（发布状态机 + 软删除恢复 + 批量排序）
+  | "ARTICLE_NOT_FOUND"
+  | "ARTICLE_STATUS_TRANSITION"
+  | "ARTICLE_RESTORE_BLOCKED"
+  | "BULLETIN_NOT_FOUND"
+  | "BULLETIN_STATUS_TRANSITION"
 
 export function ok(data: unknown, init?: { status?: number; headers?: Record<string, string> }): Response {
   return Response.json(

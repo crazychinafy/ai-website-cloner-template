@@ -29,6 +29,13 @@
       "when": 1794390779492,
       "tag": "0003_furry_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1794399739039,
+      "tag": "0004_p6c_articles_bulletins_autoincrement",
+      "breakpoints": true
     }
   ]
 }

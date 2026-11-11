@@ -71,6 +71,13 @@ export function LinkStatusPill({ status }: { status: LinkStatus }) {
   return <StatusBadge tone="neutral">停用</StatusBadge>
 }
 
+/** P6C：文章/公告三态徽章（草稿/已发布/已归档） */
+export function ArticleStatusPill({ status }: { status: "draft" | "published" | "archived" }) {
+  if (status === "published") return <StatusBadge tone="success">已发布</StatusBadge>
+  if (status === "draft") return <StatusBadge tone="info">草稿</StatusBadge>
+  return <StatusBadge tone="neutral">已归档</StatusBadge>
+}
+
 /** 已删除徽章（回收站视图） */
 export function DeletedPill() {
   return <StatusBadge tone="danger" dot={false}>已删除</StatusBadge>

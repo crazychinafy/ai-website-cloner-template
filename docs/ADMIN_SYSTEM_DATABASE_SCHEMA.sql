@@ -196,7 +196,8 @@ CREATE TABLE site_link_mirrors (
 ) ENGINE=InnoDB;
 
 CREATE TABLE articles (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6C migration 0004：id 已转 AUTO_INCREMENT（历史雪花 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   category_id BIGINT UNSIGNED NOT NULL,
   title VARCHAR(500) NOT NULL,
   content_html LONGTEXT NOT NULL,
@@ -220,7 +221,8 @@ CREATE TABLE articles (
 ) ENGINE=InnoDB;
 
 CREATE TABLE bulletins (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6C migration 0004：id 已转 AUTO_INCREMENT（历史雪花 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   title VARCHAR(500) NOT NULL,
   content_html LONGTEXT NOT NULL,
   status ENUM('draft','published','archived') NOT NULL DEFAULT 'published',

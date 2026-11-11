@@ -250,14 +250,24 @@
 
 ## P6C：文章和公告
 
-- [ ] 文章列表、搜索、分类筛选。
-- [ ] 新建/编辑草稿、预览、发布、归档。
-- [ ] SEO 字段。
-- [ ] 富文本 HTML 清洗。
-- [ ] 公告 CRUD、排序和发布状态。
-- [ ] 发布/撤回审计。
+- [x] 文章列表、搜索、分类筛选。（q=标题/作者，categoryId/status/删除范围筛选，分页 20/50/100，列排序 allowlist，默认更新时间降序 + id 并列键）
+- [x] 新建/编辑草稿、预览、发布、归档。（6 个子页：列表 / 新建 / 编辑 各两套；创建恒为草稿；`POST /articles/preview` 服务端清洗预览；状态机 draft→published/archived、published→archived、archived→published，再发布保留原 `published_at`（COALESCE），草稿 `published_at=NULL`）
+- [x] SEO 字段。（seoTitle/seoKeywords/seoDescription 全链路；留空前台回退文章标题）
+- [x] 富文本 HTML 清洗。（统一清洗器 `src/lib/admin/security/html-sanitizer.ts`（sanitize-html 白名单），8 个触点全覆盖：文章/公告 创建、编辑、发布闸门、预览；发布时正文再清洗，变化则同事务收敛写库，清洗后为空 422 拒发布；编辑器粘贴侧净化；历史 28 篇正文不批量重写、按标签集合回归通过）
+- [x] 公告 CRUD、排序和发布状态。（默认排序 = 活跃最大 +1；`POST /bulletins/reorder` 批量上移/下移：单事务、逐行乐观锁、任一行冲突整体回滚；列表默认排序值升序）
+- [x] 发布/撤回审计。（`article.{create,update,publish,archive,soft_delete,restore}`、`bulletin.{…+reorder}`；正文以摘要/长度/哈希入日志，同事务写入；403/409/422 不产生日志）
 
-验收：/articles、/articles/[id]、/bulletin/[id] 回归；XSS payload 无法执行。
+验收：/articles、/articles/[id]、/bulletin/[id] 回归 200；XSS payload 无法执行（`<script>`/`onclick`/`javascript:` 服务端剥离，预览即入库形态）。
+
+Gates：lint / typecheck / build 通过；`npm run test:admin` 34 文件 539 用例全绿（新增 `p6c-articles-api` 48、`p6c-bulletins-api` 38、`p6c-html-sanitizer` 40，真实 MySQL scratch 库 `facai8_p6c_test`）。
+
+迁移 0004：`articles.id`、`bulletins.id` 转 BIGINT UNSIGNED AUTO_INCREMENT（雪花历史 ID 原样保留，无重建无清空）；开发库 `facai8_admin` 已应用，`docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql` 同步。
+
+RBAC：复用既有 `articles.*`/`bulletins.*` 权限码——editor 不可发布/删除/恢复（可排序，排序即 `*.update`），auditor 只读；API 层强制。
+
+静态冻结：`src/lib/facai8/data/` 20 文件与 P6B 基线提交逐字节一致（`git hash-object` 全比对）；前台页直接 import 静态模块，草稿永不泄漏到公开页。
+
+> 开发库遗留（供验收复核）：`facai8_admin` 保留走查记录 `P6C走查_UI新建文章`（id `112450241390841857`，published v6，曾删除+恢复）与 `P6C走查_UI新建公告`（id `92981247277666305`，published v5，排序至 sort=0，曾删除+恢复）；走查引导账号 `smokeadmin` 密码已重置为 `P6c-Sm0ke-2026!`（`must_change_password=0`）；RBAC 补齐了早于 P6A 的种子所缺的 4 条 `article_categories.*` 权限及 4 角色映射（`INSERT IGNORE` 幂等补齐，与 `scripts/admin/seed-rbac.ts` 标准集一致）。
 
 ## P6D：广告、线路、设置
 

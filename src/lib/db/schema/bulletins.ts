@@ -5,7 +5,8 @@ import { bigint, datetime, index, int, longtext, mysqlEnum, mysqlTable, varchar 
 export const bulletins = mysqlTable(
   "bulletins",
   {
-    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey(),
+    // P6C：AUTO_INCREMENT（保留既有雪花 ID；新建由数据库生成，见 migration 0004）
+    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey().autoincrement(),
     title: varchar("title", { length: 500 }).notNull(),
     contentHtml: longtext("content_html").notNull(),
     status: mysqlEnum("status", ["draft", "published", "archived"]).notNull().default("published"),

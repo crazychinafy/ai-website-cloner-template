@@ -15,7 +15,8 @@ import { articleCategories } from "./categories.ts"
 export const articles = mysqlTable(
   "articles",
   {
-    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey(),
+    // P6C：AUTO_INCREMENT（保留既有雪花 ID；新建由数据库生成，见 migration 0004）
+    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey().autoincrement(),
     categoryId: bigint("category_id", { mode: "bigint", unsigned: true })
       .notNull()
       .references(() => articleCategories.id, { onDelete: "restrict" }),

@@ -88,10 +88,28 @@ describe("面包屑构建", () => {
     expect(h[2]).toBeUndefined() // 当前页不可点击
   })
 
-  it("6b. 仍未开发模块路径（P6C+/admin/articles）→ 不生成无效链接", () => {
-    // 导航中该条 pending 无 href → 面包屑按未注册路径回退
-    expect(crumbs("/admin/articles")).toEqual(["工作台"])
-    expect(hrefs("/admin/articles")).toEqual(["/admin"])
+  it("6b. P6C 已实现 /admin/articles 与 /admin/bulletins → 完整层级（当前页不可点击）", () => {
+    expect(crumbs("/admin/articles")).toEqual(["工作台", "内容管理", "文章管理"])
+    const h = hrefs("/admin/articles")
+    expect(h[0]).toBe("/admin")
+    expect(h[1]).toBeUndefined() // 分组名只展示，不可点击（P5 规则 3）
+    expect(h[2]).toBeUndefined() // 当前页不可点击
+    expect(crumbs("/admin/bulletins")).toEqual(["工作台", "内容管理", "公告管理"])
+  })
+
+  it("6c. P6C 编辑器子页（/new、/[id]）→ 上级模块页可点击，当前页静态标题（不暴露原始 ID）", () => {
+    expect(crumbs("/admin/articles/new")).toEqual(["工作台", "内容管理", "文章管理", "新建文章"])
+    const h = hrefs("/admin/articles/new")
+    expect(h[2]).toBe("/admin/articles") // 上级可点击
+    expect(h[3]).toBeUndefined() // 当前页不可点击
+    expect(crumbs("/admin/articles/112546110991634432")).toEqual(["工作台", "内容管理", "文章管理", "编辑文章"])
+    expect(crumbs("/admin/bulletins/new")).toEqual(["工作台", "内容管理", "公告管理", "新建公告"])
+    expect(crumbs("/admin/bulletins/42")).toEqual(["工作台", "内容管理", "公告管理", "编辑公告"])
+  })
+
+  it("6d. 无模块权限时编辑器子页仍回退单一工作台（不产生死链）", () => {
+    const noArticles = buildNav(["dashboard.read", "links.read"])
+    expect(buildBreadcrumb("/admin/articles/new", noArticles)).toEqual([{ label: "工作台", href: "/admin" }])
   })
 
   it("7. 无权限（空导航）时根页面仍为单级工作台", () => {
