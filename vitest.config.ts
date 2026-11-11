@@ -17,7 +17,7 @@ export default defineConfig({
     environment: "node",
     // vitest 5：单 worker 串行执行（多个测试文件共享同一 scratch 数据库名，必须互斥）
     maxWorkers: 1,
-    include: ["test/admin/**/*.test.ts"],
+    include: ["test/admin/**/*.test.ts", "test/admin/**/*.test.tsx"],
     testTimeout: 90_000,
     hookTimeout: 90_000,
   },

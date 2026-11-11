@@ -1,145 +1,178 @@
 "use client"
 
-// 修改密码表单（客户端）：提交 POST /api/admin/v1/auth/change-password
-// - 携带 X-CSRF-Token（挂载时从 /api/admin/v1/auth/session 获取）
-// - 成功后服务端返回轮换后的新 Cookie → 跳转后台首页
-import { useEffect, useState } from "react"
+// P5：修改密码表单（首次登录强制 / 用户主动修改共用）
+// - POST /api/admin/v1/auth/change-password（统一 API Client + X-CSRF-Token，服务端实际合同）
+// - 服务端成功后全部旧 Session 撤销并轮换新 Session → 整页替换到 returnTo || /admin
+// - 策略（与 P3 服务端一致）：12-128 位；不在浏览器复刻弱口令表（服务端为准）
 
-interface SessionResponse {
-  success: boolean
-  data?: { csrfToken: string }
-  error?: { code: string; message: string }
+import * as React from "react"
+import { Eye, EyeOff, Loader2 } from "lucide-react"
+import { FormField } from "./forms/FormField"
+import { TextInput } from "./forms/TextInput"
+import { adminApi, safeReturnTo } from "@/lib/admin/ui/api-client"
+import { useToast } from "./feedback/ToastProvider"
+
+interface Props {
+  /** 服务端派生的 CSRF Token（页面由服务端注入，避免客户端重复请求 Session） */
+  csrfToken: string
+  /** 服务端校验过的安全回跳路径 */
+  returnTo?: string | null
 }
 
-interface ChangePasswordResponse {
-  success: boolean
-  data?: { mustChangePassword: boolean }
-  error?: { code: string; message: string }
-}
-
-export function ChangePasswordForm() {
-  const [csrfToken, setCsrfToken] = useState("")
-  const [oldPassword, setOldPassword] = useState("")
-  const [newPassword, setNewPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
-  const [showPwd, setShowPwd] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // 挂载时获取当前会话的 CSRF token（服务端由 Session 派生，客户端仅透传）
-  useEffect(() => {
-    let cancelled = false
-    fetch("/api/admin/v1/auth/session", { cache: "no-store" })
-      .then(async (res) => {
-        const json = (await res.json()) as SessionResponse
-        if (!cancelled && json.success && json.data) setCsrfToken(json.data.csrfToken)
-      })
-      .catch(() => {
-        /* 获取失败 → 提交时服务端会 401/403，届时统一报错 */
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+export function ChangePasswordForm({ csrfToken, returnTo }: Props) {
+  const safeReturn = React.useMemo(() => safeReturnTo(returnTo), [returnTo])
+  const { toast } = useToast()
+  const [oldPassword, setOldPassword] = React.useState("")
+  const [newPassword, setNewPassword] = React.useState("")
+  const [confirmPassword, setConfirmPassword] = React.useState("")
+  const [showPwd, setShowPwd] = React.useState(false)
+  const [loading, setLoading] = React.useState(false)
+  const [banner, setBanner] = React.useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = React.useState<{
+    oldPassword?: string
+    newPassword?: string
+    confirmPassword?: string
+  }>({})
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (loading) return // 防重复提交
-    setError(null)
+    setBanner(null)
+    setFieldErrors({})
+
     if (!oldPassword || !newPassword || !confirmPassword) {
-      setError("请填写完整")
+      setBanner("请填写完整")
+      setFieldErrors({
+        oldPassword: oldPassword ? undefined : "请输入当前密码",
+        newPassword: newPassword ? undefined : "请输入新密码",
+        confirmPassword: confirmPassword ? undefined : "请再次输入新密码",
+      })
+      return
+    }
+    if (newPassword.length < 12) {
+      setFieldErrors({ newPassword: "新密码至少 12 位" })
       return
     }
     if (newPassword !== confirmPassword) {
-      setError("两次输入的新密码不一致")
+      setBanner("两次输入的新密码不一致")
+      setFieldErrors({ confirmPassword: "与上方新密码不一致" })
       return
     }
+
     setLoading(true)
     try {
-      const res = await fetch("/api/admin/v1/auth/change-password", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": csrfToken,
-        },
-        body: JSON.stringify({ oldPassword, newPassword, confirmPassword }),
-      })
-      const json = (await res.json()) as ChangePasswordResponse
-      if (!json.success) {
-        setError(json.error?.message ?? "修改失败，请稍后重试")
+      const res = await adminApi.changePassword({ oldPassword, newPassword, confirmPassword }, csrfToken)
+      if (!res.ok) {
+        const errs = res.error.fields ?? {}
+        setBanner(res.error.message || "修改失败，请稍后重试")
+        setFieldErrors({
+          oldPassword: errs.oldPassword,
+          newPassword: errs.newPassword,
+          confirmPassword: errs.confirmPassword,
+        })
         return
       }
-      window.location.replace("/admin")
+      toast.success("密码修改成功")
+      window.location.replace(safeReturn || "/admin")
     } catch {
-      setError("网络错误，请稍后重试")
+      setBanner("网络异常，请稍后重试")
     } finally {
       setLoading(false)
     }
   }
 
-  return (
-    <div className="admin-card">
-      <h1>修改密码</h1>
-      <p className="admin-sub">
-        {newPassword.length >= 12 ? "新密码 12-128 位，避免常见弱口令" : "新密码至少 12 位"}
-      </p>
+  const eyeToggle = (
+    <button
+      type="button"
+      onClick={() => setShowPwd((v) => !v)}
+      disabled={loading}
+      aria-label={showPwd ? "隐藏密码" : "显示密码"}
+      aria-pressed={showPwd}
+      className="rounded-md p-1.5 text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
+    >
+      {showPwd ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+    </button>
+  )
 
-      {error ? <div className="admin-error">{error}</div> : null}
+  return (
+    <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 shadow-sm">
+      <div className="mb-7 flex flex-col items-center text-center">
+        <h1 className="text-lg font-semibold text-foreground">修改密码</h1>
+        <p className="mt-1 text-sm text-muted-foreground">新密码 12-128 位，建议避免常见口令</p>
+      </div>
+
+      {banner ? (
+        <div role="alert" className="mb-5 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-sm text-destructive">
+          {banner}
+        </div>
+      ) : null}
 
       <form onSubmit={onSubmit} noValidate>
-        <div className="admin-field">
-          <label htmlFor="admin-old-pwd">当前密码</label>
-          <div className="admin-inputwrap">
-            <input
-              id="admin-old-pwd"
-              className="admin-input"
-              type={showPwd ? "text" : "password"}
-              autoComplete="current-password"
-              maxLength={128}
-              value={oldPassword}
-              onChange={(e) => setOldPassword(e.target.value)}
-              disabled={loading}
-            />
-            <button type="button" className="admin-eye" onClick={() => setShowPwd((v) => !v)} disabled={loading}>
-              {showPwd ? "隐藏" : "显示"}
-            </button>
-          </div>
-        </div>
-
-        <div className="admin-field">
-          <label htmlFor="admin-new-pwd">新密码</label>
-          <input
+        <FormField id="admin-old-pwd" label="当前密码" required error={fieldErrors.oldPassword} loading={loading} className="mb-4">
+          <TextInput
+            id="admin-old-pwd"
+            type={showPwd ? "text" : "password"}
+            autoComplete="current-password"
+            maxLength={128}
+            value={oldPassword}
+            onChange={(e) => setOldPassword(e.target.value)}
+            trailing={eyeToggle}
+          />
+        </FormField>
+        <FormField
+          id="admin-new-pwd"
+          label="新密码"
+          required
+          error={fieldErrors.newPassword}
+          description="12-128 位；修改后其他设备上的登录状态将全部失效"
+          loading={loading}
+          className="mb-4"
+        >
+          <TextInput
             id="admin-new-pwd"
-            className="admin-input"
             type={showPwd ? "text" : "password"}
             autoComplete="new-password"
             maxLength={128}
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            disabled={loading}
+            trailing={eyeToggle}
+            showCount
           />
-        </div>
-
-        <div className="admin-field">
-          <label htmlFor="admin-confirm-pwd">再次输入新密码</label>
-          <input
+        </FormField>
+        <FormField
+          id="admin-confirm-pwd"
+          label="再次输入新密码"
+          required
+          error={fieldErrors.confirmPassword}
+          loading={loading}
+          className="mb-5"
+        >
+          <TextInput
             id="admin-confirm-pwd"
-            className="admin-input"
             type={showPwd ? "text" : "password"}
             autoComplete="new-password"
             maxLength={128}
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            disabled={loading}
+            trailing={eyeToggle}
           />
-        </div>
+        </FormField>
 
-        <button type="submit" className="admin-btn" disabled={loading}>
-          {loading ? "提交中…" : "确认修改"}
+        <button
+          type="submit"
+          disabled={loading}
+          className="adm-touch-target flex h-10 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-medium text-primary-foreground transition-colors outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              提交中…
+            </>
+          ) : (
+            "确认修改"
+          )}
         </button>
       </form>
-
-      <p className="admin-note">修改成功后其他设备上的登录状态将全部失效</p>
     </div>
   )
 }

@@ -5,6 +5,51 @@
   "model": "omlx/qwen38",
 
   "providers": {
+ 
+"splash": {
+  "name": "Mac Studio Splash - Flash Next",
+  "env": [
+    "SPLASH_API_KEY"
+  ],
+  "package": "@opencode/ai/providers/openai-compatible",
+  "settings": {
+    "baseURL": "http://192.168.50.96:8083/v1",
+    "apiKey": "{env:SPLASH_API_KEY}",
+    "headerTimeout": 600000,
+    "chunkTimeout": 900000
+  },
+  "models": {
+    "qwen38-flash-next": {
+      "name": "Qwen3.8-Flash-Next IQ3_S (DFlash2)",
+      "modelID": "local/qwen38-flash-next",
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ],
+        "reasoning": {
+          "supported": true,
+          "toggle": true,
+          "effort": [
+            "low",
+            "medium",
+            "xhigh"
+          ]
+        }
+      },
+      "limit": {
+        "context": 128768,
+        "output": 32192
+      },
+      "compatibility": {
+        "maxTokensField": "max_tokens"
+      }
+    }
+  }
+},
     "omlx": {
       "name": "Mac Studio oMLX",
       "package": "@opencode/ai/providers/openai-compatible",

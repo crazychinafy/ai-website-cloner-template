@@ -1,0 +1,100 @@
+
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "model": "omlx/qwen38",
+
+  "providers": {
+    "omlx": {
+      "name": "Mac Studio oMLX",
+      "package": "@opencode/ai/providers/openai-compatible",
+
+      "settings": {
+        "baseURL": "http://192.168.50.96:8000/v1",
+        "apiKey": "{env:LOCAL_LLM_API_KEY}",
+        "headerTimeout": 600000,
+        "chunkTimeout": 900000
+      },
+
+      "models": {
+
+        "qwen38": {
+          "name": "Qwen3.8-27B-4bit",
+          "modelID": "Qwen3.8-27B-4bit",
+
+          "capabilities": {
+            "tools": true,
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+
+          "limit": {
+            "context": 262144,
+            "output": 32192
+          },
+
+          "compatibility": {
+            "maxTokensField": "max_tokens"
+          }
+        },
+
+        "qwen36": {
+          "name": "Qwen3.8-27B-8bit",
+          "modelID": "Qwen3.8-27B-8bit",
+
+          "capabilities": {
+            "tools": true,
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+
+          "limit": {
+            "context": 262144,
+            "output": 32192
+          },
+
+          "compatibility": {
+            "maxTokensField": "max_tokens"
+          }
+        },
+
+        "gptoss": {
+          "name": "GPT-OSS-120B-4bit",
+          "modelID": "gpt-oss-120b-4bit",
+
+          "capabilities": {
+            "tools": true,
+            "input": ["text"],
+            "output": ["text"]
+          },
+
+          "limit": {
+            "context": 131072,
+            "output": 32192
+          },
+
+          "compatibility": {
+            "maxTokensField": "max_tokens"
+          }
+        }
+      }
+    }
+  },
+
+  "mcp": {
+    "servers": {
+      "playwright": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@playwright/mcp@latest",
+          "--browser",
+          "chromium"
+        ],
+        "enabled": true,
+        "timeout": 120000
+      }
+    }
+  }
+}

@@ -1,247 +1,131 @@
-/* 管理后台页面专属样式（P3）
-   独立于前台 facai8.css：只被 /admin 下的 layout 引入，不进入前台页面，
-   避免 Tailwind preflight 之类的全局重置影响克隆前台。 */
+/* 管理后台设计系统（P5 重写）
+   ─────────────────────────────────────────────────────────────────
+   1. Tailwind v4 入口：`@import "tailwindcss"` 只出现在本文件，
+      而本文件只被 /admin 下的 layout 引入 → preflight/工具类仅作用于
+      后台文档，前台页面（facai8.css / globals.css）不受任何影响。
+   2. `@theme` 定义后台专属设计令牌（--color-* → bg-primary 等工具类），
+      令牌值只在后台文档生效（:root 变量随本 CSS 注入）。
+   3. `.admin-root` 是后台视觉作用域：字体、底色、文字色统一在此声明，
+      组件通过 Tailwind 工具类 + 令牌组合，不在组件里硬编码颜色。
+   前台零改动：globals.css / facai8.css / iconfont.css / 根 layout 均不修改。 */
 
-:root {
-  --adm-bg: #0f172a;
-  --adm-panel: #1e293b;
-  --adm-border: #334155;
-  --adm-text: #e2e8f0;
-  --adm-muted: #94a3b8;
-  --adm-accent: #38bdf8;
-  --adm-danger: #f87171;
-  --adm-ok: #34d399;
+@import "tailwindcss";
+
+@theme {
+  /* ── 基础面（浅灰底 + 白卡片）────────────────────────────── */
+  --color-background: #f4f5f7;
+  --color-foreground: #20242b;
+  --color-card: #ffffff;
+  --color-card-foreground: #20242b;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #20242b;
+
+  /* ── 品牌强调色（主操作）────────────────────────────────── */
+  --color-primary: #2563eb;
+  --color-primary-foreground: #ffffff;
+
+  /* ── 次级面 ─────────────────────────────────────────────── */
+  --color-secondary: #eef0f4;
+  --color-secondary-foreground: #3c4453;
+  --color-muted: #eef0f4;
+  --color-muted-foreground: #667085;
+  --color-accent: #e8eefc;
+  --color-accent-foreground: #1d4ed8;
+
+  /* ── 语义状态色 ─────────────────────────────────────────── */
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-success: #16a34a;
+  --color-success-soft: #ecfdf3;
+  --color-warning: #d97706;
+  --color-warning-soft: #fff7e6;
+  --color-info: #2563eb;
+  --color-info-soft: #eff6ff;
+
+  /* ── 线条与焦点 ─────────────────────────────────────────── */
+  --color-border: #e4e7ec;
+  --color-input: #d0d5dd;
+  --color-ring: #2563eb;
+
+  /* ── 侧边栏（独立深色提亮，与内容区区分）────────────────── */
+  --color-sidebar: #ffffff;
+  --color-sidebar-foreground: #475467;
+  --color-sidebar-active: #eff4ff;
+  --color-sidebar-active-foreground: #1d4ed8;
+
+  /* ── 圆角与动画 ─────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --animate-fade-in: fade-in 0.18s ease-out;
+  --animate-scale-in: scale-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-toast-in: toast-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-drawer-in: drawer-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes scale-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes drawer-in {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
 }
 
-html,
-body {
-  margin: 0;
-  padding: 0;
-}
-
-.admin-page {
+/* ── 后台根作用域 ─────────────────────────────────────────────
+   只影响 /admin 文档（本文件仅在 admin layout 中加载）。
+   preflight 会重置 html/body，这里恢复后台所需的文档级样式。 */
+.admin-root {
   min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--adm-bg);
-  color: var(--adm-text);
-  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
-}
-
-.admin-shell {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 居中卡片（登录 / 改密） */
-.admin-center {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 16px;
-}
-
-.admin-card {
-  width: 100%;
-  max-width: 400px;
-  background: var(--adm-panel);
-  border: 1px solid var(--adm-border);
-  border-radius: 12px;
-  padding: 28px 24px;
-}
-
-.admin-card h1 {
-  font-size: 20px;
-  margin: 0 0 4px;
-}
-
-.admin-card .admin-sub {
-  color: var(--adm-muted);
-  font-size: 13px;
-  margin: 0 0 20px;
-}
-
-/* 受保护区域壳（顶栏） */
-.admin-topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 20px;
-  background: var(--adm-panel);
-  border-bottom: 1px solid var(--adm-border);
-}
-
-.admin-topbar .admin-brand {
-  font-weight: 700;
-  font-size: 15px;
-}
-
-.admin-topbar .admin-who {
-  color: var(--adm-muted);
-  font-size: 13px;
-  margin-left: auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.admin-content {
-  flex: 1;
-  padding: 24px 20px;
-  max-width: 960px;
-  width: 100%;
-  margin: 0 auto;
-}
-
-/* 表单 */
-.admin-field {
-  margin-bottom: 16px;
-}
-
-.admin-field label {
-  display: block;
-  font-size: 13px;
-  color: var(--adm-muted);
-  margin-bottom: 6px;
-}
-
-.admin-inputwrap {
-  position: relative;
-  display: flex;
-}
-
-.admin-input {
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-  background: var(--adm-bg);
-  border: 1px solid var(--adm-border);
-  border-radius: 8px;
-  color: var(--adm-text);
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif;
   font-size: 14px;
-  padding: 10px 12px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
 
-.admin-input::placeholder {
-  color: #64748b;
+/* 后台内滚动条（仅滚动容器使用） */
+.admin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent) transparent;
 }
-
-.admin-input:focus {
-  outline: 2px solid var(--adm-accent);
-  outline-offset: 0;
-  border-color: transparent;
+.admin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
-
-.admin-eye {
-  border: 1px solid var(--adm-border);
-  border-left: 0;
-  border-radius: 0 8px 8px 0;
-  background: var(--adm-panel);
-  color: var(--adm-muted);
-  cursor: pointer;
-  padding: 0 12px;
-  font-size: 13px;
-}
-
-.admin-eye:hover {
-  color: var(--adm-text);
-}
-
-.admin-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--adm-accent);
-  color: #082f49;
-  font-weight: 700;
-  font-size: 14px;
-  border: 0;
+.admin-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent);
   border-radius: 8px;
-  padding: 11px 16px;
-  cursor: pointer;
 }
-
-.admin-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.admin-btn-ghost {
+.admin-scroll::-webkit-scrollbar-track {
   background: transparent;
-  border: 1px solid var(--adm-border);
-  color: var(--adm-text);
-  width: auto;
-  padding: 7px 14px;
-  font-size: 13px;
 }
 
-.admin-btn-ghost:hover {
-  border-color: var(--adm-accent);
-  color: var(--adm-accent);
+/* 减少动效偏好：后台动画尊重系统设置 */
+@media (prefers-reduced-motion: reduce) {
+  .admin-root *,
+  .admin-root *::before,
+  .admin-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
-.admin-error {
-  color: var(--adm-danger);
-  font-size: 13px;
-  background: rgba(248, 113, 113, 0.1);
-  border: 1px solid rgba(248, 113, 113, 0.35);
-  border-radius: 8px;
-  padding: 9px 12px;
-  margin-bottom: 14px;
-  word-break: break-all;
-}
-
-.admin-note {
-  color: var(--adm-muted);
-  font-size: 12px;
-  margin-top: 14px;
-  text-align: center;
-}
-
-.admin-link {
-  color: var(--adm-accent);
-  text-decoration: none;
-  font-size: 13px;
-}
-
-.admin-link:hover {
-  text-decoration: underline;
-}
-
-/* 仪表盘占位 */
-.admin-hello {
-  font-size: 18px;
-  margin: 0 0 8px;
-}
-
-.admin-rolebadges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 12px 0;
-}
-
-.admin-badge {
-  font-size: 12px;
-  color: var(--adm-accent);
-  border: 1px solid var(--adm-border);
-  border-radius: 999px;
-  padding: 3px 10px;
-  background: rgba(56, 189, 248, 0.08);
-}
-
-.admin-permcount {
-  color: var(--adm-muted);
-  font-size: 13px;
-}
-
-@media (max-width: 480px) {
-  .admin-topbar .admin-who {
-    display: none;
+/* 触屏设备：增大控件点击目标（≥40px） */
+@media (pointer: coarse) {
+  .admin-root .adm-touch-target {
+    min-height: 40px;
   }
 }

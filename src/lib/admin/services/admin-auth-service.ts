@@ -85,11 +85,16 @@ function requireWriteOrigin(req: Request): void {
   }
 }
 
-function zodFields(e: { issues: Array<{ path: PropertyKey[]; message: string }> }): Record<string, string> {
+function zodFields(
+  e: { issues: Array<{ path: PropertyKey[]; message: string; code?: string }> },
+): Record<string, string> {
   const fields: Record<string, string> = {}
   for (const i of e.issues) {
     const key = i.path.length > 0 ? String(i.path[i.path.length - 1]) : "body"
-    if (!(key in fields)) fields[key] = i.message
+    // Zod 内部消息（字段缺失/类型不符，如 "Invalid input: expected string, received undefined"）
+    // 不是用户可见文案：统一为中性提示；schema 自定义消息（min/max/refine）原样透出
+    const msg = i.code === "invalid_type" ? "参数格式不正确" : i.message
+    if (!(key in fields)) fields[key] = msg
   }
   return fields
 }

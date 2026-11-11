@@ -171,21 +171,35 @@
 
 ## P5：后台 UI 框架
 
+> **执行状态：已完成（2026-11-11），等待用户验收。** 要点：
+> 独立后台框架全部落地且与前台彻底隔离——`(protected)/(auth)` 独立 route group + 自绘 AdminShell（侧边导航/顶部栏/面包屑），不复用前台 SiteFrame/Header；Tailwind v4 入口 + `@theme` 设计令牌只存在于 `src/components/admin/admin.css`（仅 admin 文档导入），前台产物字节级不变（10 路由回归 200 + `src/lib/facai8`/`globals.css`/`layout.tsx`/`public` git diff 为空）；
+> 菜单由 Session 权限驱动（`lib/admin/ui/navigation.ts` buildNav；**菜单隐藏 ≠ 授权**，服务端守卫 `require-permission` 是唯一安全边界，p5-permissions 用真实 MySQL 四角色 42/32/22/12 实测核对）；未实现模块以「待开放」占位、无死链；首页无任何伪造业务统计（只展示真实数据源/会话/权限规模）；
+> 核心 UI 组件：DataTable（受控 state 上抛；服务端分页 20/50/100、clamp 上限 100；服务端排序只上抛不本地重排；Loading 骨架/Empty/Error+requestId/行点击键盘可达）、SearchToolbar（关键词回车+下拉多条件+重置+loading 防重复）、ConfirmDialog（ESC/焦点归还/loading 锁闭/危险确认）、FormField 套件（字段级错误定位）、后台专属 ToastProvider（四类型、aria-live、最多 4 条防堆积；不复用前台 ToastHost）；
+> 测试：`test/admin` 8 套 P5 组件/权限套件 75 条（happy-dom + 真实 MySQL scratch `facai8_p5_test`），全量 **207/207（24 文件）全绿**，P0–P4 基线 132 条不受影响；`package.json` 新增 devDependency `happy-dom`（DOM 组件测试需要，属预期变更）；lint 0 告警、typecheck、build 全绿；
+> 实机走查（Playwright，独立截图库 `facai8_p5_dev`：迁移 24 表 + Seed + bootstrap `p5review`）发现并修复 **4 个真实运行链路缺陷**（详见交付物下「实机缺陷修复」）：safeReturnTo 服务端调用 500、(auth) SSR useToast 抛错、(auth) 组守卫覆盖改密页造成首登自 307 死循环、改密客户端漏传 confirmPassword + zod 原始消息外泄；
+> 截图 7 张存 `docs/design-references/p5-admin-*.png`（登录 1440 / 强制改密 1440 / 首页 1440·1024·768·390 / 移动端抽屉 390；`docs/*` 被 .gitignore 忽略，属本地产物；截图由 agent Playwright 工具在真实浏览器视口下采集）；仓库无 Playwright e2e 基建，**e2e = 未执行**（如实记录，不替代组件测试结论）。
+
 ### 工作项
-- [ ] 独立 /admin layout。
-- [ ] 侧边导航、顶部栏、面包屑。
-- [ ] 根据权限显示菜单。
-- [ ] DataTable 服务端分页、排序、筛选。
-- [ ] SearchToolbar、ConfirmDialog、表单字段、Toast。
-- [ ] Empty/Loading/Error/403 状态。
-- [ ] 表单字段级校验反馈。
-- [ ] 桌面、平板布局。
+- [x] 独立 /admin layout。（`(protected)/layout` requireAdminPage + AdminShell；`(auth)/layout` 无守卫 + ToastProvider；admin.css 独立设计系统，Tailwind 仅 admin 生效）
+- [x] 侧边导航、顶部栏、面包屑。（AdminSidebar 分组折叠/权限过滤/小屏抽屉；AdminTopbar 用户菜单含登出；AdminBreadcrumb 由路由元生成）
+- [x] 根据权限显示菜单。（buildNav 以 Session 权限集过滤；隐藏≠授权——越权直调 API 仍 403/CHANGE_PASSWORD_REQUIRED；未实现模块「待开放」占位）
+- [x] DataTable 服务端分页、排序、筛选。（受控组件只上抛 state；pageSize 20/50/100、clamp 上限 100；排序 asc→desc→取消、`aria-sort` 挂 `th`；Loading/Empty/Error+requestId；行点击键盘可达；小屏表格局部横向滚动）
+- [x] SearchToolbar、ConfirmDialog、表单字段、Toast。（回车/搜索/多条件/重置/防重复；ESC+焦点归还+危险确认+loading 锁闭；FormField/Select/Textarea 字段级错误；四类型 aria-live 全局 Toast、手动关闭、最多 4 条）
+- [x] Empty/Loading/Error/403 状态。（EmptyState/ErrorState/表内骨架；`/admin/forbidden` 独立 403 页 + API 403 统一文案）
+- [x] 表单字段级校验反馈。（api-client 解析字段错误 → FormField 定位展示；zod `invalid_type` 内部消息中性化为「参数格式不正确」，不外泄框架原文）
+- [x] 桌面、平板布局。（1440/1024/768/390 四档截图验证：卡片自适应列数、侧边栏折叠、移动端汉堡抽屉、表格横向局部滚动）
 
 ### 验收
-- [ ] 后台不继承前台 SiteFrame。
-- [ ] 未授权用户不看到敏感菜单，直接 API 调用仍被拒绝。
-- [ ] pageSize 上限 100。
-- [ ] 键盘操作和焦点状态正常。
+- [x] 后台不继承前台 SiteFrame。（AdminShell 自绘；登录/改密/首页/403 均独立布局；前台 10 路由回归 200 OK，冻结源与前台样式 git diff 为空）
+- [x] 未授权用户不看到敏感菜单，直接 API 调用仍被拒绝。（buildNav 权限矩阵：四角色 42/32/22/12 与 Seed 一致；editor/auditor 无系统管理菜单，直调 `administrators.*` 实时 403）
+- [x] pageSize 上限 100。（clampPageSize 单测 + DataTable 切换 50/100 页码重置；服务端独立校验）
+- [x] 键盘操作和焦点状态正常。（表头排序 Enter/Space、行 Enter 触发、ConfirmDialog ESC 关闭+焦点归还默认焦点、Toast aria-live=polite、所有交互元素 focus-visible 可见）
+
+### 实机缺陷修复（走查发现，均在 P5 源码内）
+1. `safeReturnTo` 原在 `"use client"` 的 api-client 中，被服务端页面组件调用 → `/admin/login` 500。抽为同构纯函数 `src/lib/admin/ui/return-to.ts`（服务端页面直接导入；api-client 再导出保持客户端导入路径不变）。
+2. `useToast` 在 (auth) 页面 SSR 期无 Provider 抛错 → (auth) layout 统一包裹 `ToastProvider`（服务端渲染期上下文恒存在）。
+3. `guardLoginPage` 原在 (auth) layout，覆盖改密页 → mustChange 用户登录后被整页跳 `/admin/change-password` 又被守卫跳回同页，自 307 死循环（ERR_TOO_MANY_REDIRECTS）。守卫移至仅 `/admin/login` 页面，改密页保留自身未登录守卫。
+4. `adminApi.changePassword` 漏传 `confirmPassword`（服务端 Zod 三字段 strict 合同）→ 422；且 zod 4 `invalid_type` 原始消息（"Invalid input: expected string, received undefined"）外泄到 UI。客户端改发全三字段；`zodFields` 将 `invalid_type` 中性化为「参数格式不正确」（自定义 min/max/refine 消息原样保留）。
 
 ## P6A：分类和标签
 
