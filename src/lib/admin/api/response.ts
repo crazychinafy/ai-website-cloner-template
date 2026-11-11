@@ -36,6 +36,13 @@ export type AdminErrorCode =
   | "TAG_NAME_CONFLICT"
   | "REORDER_SCOPE_MISMATCH"
   | "REORDER_DUPLICATE"
+  // P6B：网址管理业务错误码（site_links 聚合：详情 1:1 + 备用链接 1:N）
+  | "LINK_NOT_FOUND"
+  | "LINK_STATUS_TRANSITION"
+  | "LINK_RESTORE_BLOCKED"
+  | "LINK_MIRROR_MISMATCH"
+  | "LINK_MIRROR_DUPLICATE"
+  | "TAG_NOT_USABLE"
 
 export function ok(data: unknown, init?: { status?: number; headers?: Record<string, string> }): Response {
   return Response.json(

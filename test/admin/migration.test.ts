@@ -27,7 +27,7 @@ describe("migration 行为", () => {
   it("空库初始化成功：23 张表 + __drizzle_migrations 跟踪表", async () => {
     await runMigrations(pool)
     expect(await count("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = ?", "facai8_p2_test")).toBe(24)
-    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(3) // P6A.1：0000 + 0001 + 0002
+    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(4) // P6B：0000 + 0001 + 0002 + 0003
     const db = makeDb(pool)
     const links = await db.select({ id: schema.siteLinks.id }).from(schema.siteLinks)
     expect(links).toHaveLength(0)
@@ -44,7 +44,7 @@ describe("migration 行为", () => {
 
     await runMigrations(pool) // 第二次执行
     expect(await count("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = ?", "facai8_p2_test")).toBe(24)
-    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(3)
+    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(4)
     // 数据仍在
     expect(await count("SELECT COUNT(*) AS n FROM site_tags")).toBe(1)
     expect(await count("SELECT COUNT(*) AS n FROM link_categories")).toBe(2)
@@ -55,7 +55,29 @@ describe("migration 行为", () => {
   it("第三次执行仍然幂等", async () => {
     await runMigrations(pool)
     expect(await count("SELECT COUNT(*) AS n FROM site_tags")).toBe(1)
-    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(3)
+    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(4)
+  })
+
+  // P6B：0003 把 site_links.id 切成 AUTO_INCREMENT（保留快照显式 ID 的能力）
+  it("0003：site_links.id 为 AUTO_INCREMENT，且仍允许显式写入 17/18 位快照 ID", async () => {
+    const [col] = await (pool as Any).query(
+      "SELECT LOWER(extra) AS e FROM information_schema.columns WHERE table_schema = 'facai8_p2_test' AND table_name = 'site_links' AND column_name = 'id'",
+    )
+    expect(String((col as Array<{ e: string }>)[0].e)).toContain("auto_increment")
+
+    await (pool as Any).query("INSERT INTO link_categories (id, name) VALUES (9900000000000000020, 'ai-cat')")
+    // 显式大 ID（模拟静态快照导入）
+    await (pool as Any).query(
+      "INSERT INTO site_links (id, category_id, title, url, description) VALUES (112546110991634432, 9900000000000000020, 'snapshot', 'https://s.example', '')",
+    )
+    // 省略 ID（P6B 后台新建路径）→ 数据库生成
+    await (pool as Any).query("INSERT INTO site_links (category_id, title, url, description) VALUES (9900000000000000020, 'generated', 'https://g.example', '')")
+    const [rows] = await (pool as Any).query(
+      "SELECT id FROM site_links WHERE title = 'generated'",
+    )
+    const genId = BigInt((rows as Array<{ id: string }>)[0].id)
+    expect(genId > BigInt("112546110991634432")).toBe(true) // 起点 = max+1，永不与快照 ID 冲突
+    expect(await count("SELECT COUNT(*) AS n FROM site_links")).toBe(2) // 本用例新建 snapshot + generated
   })
 
   it("外键阻止删除仍被引用的父记录（RESTRICT）", async () => {

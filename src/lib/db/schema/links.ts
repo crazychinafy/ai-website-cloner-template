@@ -18,7 +18,8 @@ import { siteTags } from "./tags.ts"
 export const siteLinks = mysqlTable(
   "site_links",
   {
-    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey(),
+    // P6B：BIGINT 主键启用 AUTO_INCREMENT（migration 0003）；静态快照仍显式写入原始 17/18 位 ID
+    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().autoincrement().primaryKey(),
     categoryId: bigint("category_id", { mode: "bigint", unsigned: true })
       .notNull()
       .references(() => linkCategories.id, { onDelete: "restrict" }),

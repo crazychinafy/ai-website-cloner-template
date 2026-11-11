@@ -224,14 +224,27 @@
 
 ## P6B：网址与详情
 
-- [ ] 网址分页、搜索、分类/标签筛选。
-- [ ] 新增、编辑、草稿、发布、停用。
-- [ ] URL scheme 校验。
-- [ ] Logo 选择和预览。
-- [ ] 详情补充字段编辑。
-- [ ] 备用链接增删排序。
-- [ ] 软删除和恢复策略。
-- [ ] 并发 version 校验。
+> **执行状态：已完成（2026-11-11），等待用户验收。** 要点：
+> `/admin/links` 列表（3,791 行快照关键词/分类/标签/状态筛选、服务端排序分页、点击数/更新时间列、「含已删除」回收站视图）+ 宽对话框表单（max-w-3xl，**未按原计划做 `/links/new`、`/links/edit/[id]` 子页，改用与 P6A 一致的 dialog 形态**）：基本信息 + 详情补充开关 + 备用链接全量编辑（增删/↑↓/上限 20）；
+> 聚合 PATCH 契约：`detail` 缺省=不改、`null`=删除、对象=新建/覆盖；`mirrors` 数组=全量替换（编辑既有行按 id 归属校验，非本链接 id 422）；聚合任一子表变化即 bump 父级 `version`；普通 PATCH 无 status 字段，状态只走 `PATCH /status`（需 `links.publish`）；`sourceSnapshot`/`isGone` 不可编辑；POST 恒为草稿、`sourceSnapshot=false`，`sortOrder` 缺省 = 未删除全局 max+1；
+> URL 校验仅 http/https（拒 `javascript:`/`data:`/`file:`/`vbscript:`、控制字符、内嵌凭据、`//` 协议相对）；logo/preview 允许空、站内 `/...` 或绝对 http(s)（快照 1 行绝对 logo 兼容）；`detailHtml` 走首个服务端白名单清洗器 `src/lib/admin/validation/html-sanitize.ts`（无 script/iframe/事件属性/javascript: 协议；P6C 复用），zod 20,000 字符上限低于 64KB body 限制；
+> 状态机 draft↔published、draft/published→disabled、disabled→published，其余 422 `LINK_STATUS_TRANSITION`（同态提交 422）；publish 重新校验分类+标签可用（409 `CATEGORY_NOT_USABLE`/`TAG_NOT_USABLE`）；软删除保留详情/备用链接、恢复重校验分类标签（409 `LINK_RESTORE_BLOCKED`）且保留原状态；所有写路径 version+1、同事务审计 `link.{create,update,publish,disable,unpublish,soft_delete,restore}`（detail 审计只记字段名不记正文）；
+> 迁移 `0003_furry_hydra.sql` 将 `site_links.id` 转 `BIGINT UNSIGNED AUTO_INCREMENT`（`SET FOREIGN_KEY_CHECKS` 包裹，journal idx 3），快照 17/18 位显式 id 原样保留、新行自增（实机 `...33`→`...40` 连号验证）；DTO id 以十进制字符串往返（浏览器 JS 精度下 UI 仍显示完整 id）；
+> RBAC 复用既有 `links.{read,create,update,publish,delete}`：editor=读/建/改（状态、删除、恢复 403）、auditor=只读、status 端点单独 `links.publish`、restore 单独 `links.delete`，API 层强制并覆盖测试；不自动抓取提交的 URL（无反向代理请求，SSRF 面为零）；
+> 测试：全量 `npm run test:admin` **31 文件 / 411 用例全绿**（P6A 基线 344 + P6B 新增 65 + 面包屑 +1；`p6b-links-schema.test.ts` 25 + `p6b-links-api.test.ts` 40，真实 MySQL scratch 库 `facai8_p6b_test`）；lint 0 告警、typecheck、build 全绿（新增 `/admin/links` + 4 个 `/api/admin/v1/links*` 路由）；
+> 既有测试更新（断言对象已被 P6B 合法改变）：`p5-breadcrumb.test.ts` 测试 6 改为断言 `/admin/links` 完整面包屑（+6b 用 `/admin/articles` 保留未开发回退断言）、`p6a-autoinc.test.ts` site_links 断言改为 EXTRA 含 auto_increment、`migration.test.ts` 迁移计数 3→4；
+> 前台零回归：前台页面/CSS/路由零改动；`src/lib/facai8/data/` 20 个冻结文件 SHA-256 与基线 20/20 一致、git diff 为空；`CONTENT_SOURCE` 仍为 static（未切 mysql）；
+> 实机走查（浏览器 `http://localhost:3000`，`facai8_admin`，super_admin 登录）：列表渲染 3,791 行、新建对话框 POST 草稿 200、行内「发布」`PATCH /status` 200（v1→v2、下架/停用按钮出现）、「删除」确认框 → DELETE 200 行消失、「含已删除」视图「已删除」徽标 + 「恢复」确认 → POST restore 200（v4、动作列恢复）、编辑对话框（分类/标签下拉加载真实选项）填写详情标注 + 新增备用链接 → `PATCH /links/[id]` 200（v4→v5，响应含 detail+mirrors，toast「已更新」）；审计 `link.*` 12 条与操作对应；
+> 开发库遗留（供验收复核）：`facai8_admin` 保留 1 条冒烟记录 `P6B冒烟_测试网址`（id `112546110991634433`，published v5，含 1 条详情标注与 1 条备用链接；走查中脚本误触产生的 7 条重复草稿已连带子表物理清除），走查引导账号 `smokeadmin`（super_admin，Argon2id，`must_change_password=0`）保留。
+
+- [x] 网址分页、搜索、分类/标签筛选。
+- [x] 新增、编辑、草稿、发布、停用。
+- [x] URL scheme 校验。
+- [x] Logo 选择和预览。
+- [x] 详情补充字段编辑。
+- [x] 备用链接增删排序。
+- [x] 软删除和恢复策略。
+- [x] 并发 version 校验。
 
 验收：/、/category/[categoryId]、/link/[id]、/tag/[tagId] 回归；缺失详情的链接行为不变。
 

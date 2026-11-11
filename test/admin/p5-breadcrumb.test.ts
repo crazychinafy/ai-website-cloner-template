@@ -79,9 +79,19 @@ describe("面包屑构建", () => {
     expect(hrefs("/")).toEqual(["/admin"])
   })
 
-  it("6. 未开发模块路径（P6 规划中 /admin/links）→ 不生成无效链接", () => {
-    // P5 未实现 /admin/links 页面：导航中该条 pending 无 href → 面包屑回退
-    expect(crumbs("/admin/links")).toEqual(["工作台"])
+  it("6. P6B 已实现 /admin/links → 工作台 / 内容管理 / 网址管理（分组与当前页不可点击）", () => {
+    // P6B 起该模块已开放：导航条目带 href，面包屑生成完整层级
+    expect(crumbs("/admin/links")).toEqual(["工作台", "内容管理", "网址管理"])
+    const h = hrefs("/admin/links")
+    expect(h[0]).toBe("/admin")
+    expect(h[1]).toBeUndefined() // 分组名只展示，不可点击（P5 规则 3）
+    expect(h[2]).toBeUndefined() // 当前页不可点击
+  })
+
+  it("6b. 仍未开发模块路径（P6C+/admin/articles）→ 不生成无效链接", () => {
+    // 导航中该条 pending 无 href → 面包屑按未注册路径回退
+    expect(crumbs("/admin/articles")).toEqual(["工作台"])
+    expect(hrefs("/admin/articles")).toEqual(["/admin"])
   })
 
   it("7. 无权限（空导航）时根页面仍为单级工作台", () => {
