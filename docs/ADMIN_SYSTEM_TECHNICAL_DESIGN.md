@@ -633,6 +633,7 @@
 P8（前台内容读取迁移到统一 Content Repository）已实施并通过验证，关键实现决策如下（完整交付报告：`docs/P8_FRONTEND_MIGRATION_REPORT.md`；平价证据：`docs/P8_DATA_PARITY_REPORT.md`；切换/回退：`docs/P8_ROLLBACK_RUNBOOK.md`）：
 
 - **目录结构**：`src/lib/facai8/content/` 下 `repository.ts`（26 方法契约 + 搜索封顶 `SEARCH_LINK_LIMIT=200`/`SEARCH_ARTICLE_LIMIT=100`）、`types.ts`（客户端安全 DTO）、`static-repository.ts` / `mysql-repository.ts`（双实现）、`rules.ts`（搜索匹配/相关推荐/摘要/可见性的共享纯函数，保证两源逐字符同规则）、`source.ts`（单例 + 去重 + 故障边界）、`errors.ts`（server-only `ContentSourceError`）。
+- **公开可见性统一契约**（`repository.ts` 头注释为准）：links=`status='published' AND deleted_at IS NULL`（isGone 仍可见，前台渲染「已失效」徽章）；articles/bulletins 叠加 `published_at ≤ DB UTC 时钟`；ads 叠加投放窗口。交付后修复轮（2026-11-12）补齐两条：详情/备用链接可见性**继承所属链接**（`getLinkDetail`/`getLinkMirrors` 自带 `linkPublic()` 门槛 → null/[]，不再依赖调用方先查 `getLinkById`）；首页「最近更新」= `site_settings.recent_links` JSON 快照按 ID 重读链接**当前状态与当前字段值**（`getSiteSettings`/`getRecentLinks` 共用同一过滤助手，停用/软删/改名下一次请求即反映）。
 - **数据层补充迁移**：`0006`（settings 编码修复 + `site_links.tag_sort_order`）、`0007`（`site_links.archive_sort_order`）配合回填脚本，使 mysql 侧列表序与静态档案序/标签序恒等；迁移总数 tripwire 更新为 8。
 - **页面迁移**：54 条/页分页、URL、空态语义（公告缺失≠404、分类/标签缺失=页内「不存在」）全部保持；`Header`/`SiteFooter` 改服务端组件直读仓库，`Search`/`SubmitArticle` 等客户端组件纯 props 化；SEO `generateMetadata` 与页面同源。
 - **util 拆分**：`util.ts` 只留纯客户端安全函数；触达静态数据的函数原样复制为 `util-static-data.ts`（冻结平价预言机，仅服务端/测试引用），保证浏览器包不再被打入内容数据。

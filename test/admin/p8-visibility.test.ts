@@ -4,11 +4,14 @@
 //   - articles / bulletins：draft、published_at 未来（计划发布）、软删行不泄漏；到点行立即可见
 //   - ads：非 active 状态、窗口未到 / 已过、软删行不泄漏；NULL 窗口 = 长期投放
 //   - 搜索 / 相关推荐 / 首页分组 / 最新榜单同样吃可见性（草稿词搜不到、失效链接不进相关推荐）
+//   - 详情 / 备用链接可见性继承所属链接（getLinkDetail / getLinkMirrors 自带门槛，P8 契约补全）
+//   - 首页「最近更新」= 设置 JSON 快照按链接当前状态过滤 + 当前字段值渲染（P1 修复）
 // 时间判断基准 = 数据库 UTC 时钟（UTC_TIMESTAMP(3)），播种与断言同一时钟，无应用时区偏差。
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { Pool } from "mysql2/promise"
 import { setupP8Scratch, teardownP8Scratch, importP8Snapshot, p8MysqlRepo } from "./p8-harness"
 import { articleExcerpt } from "../../src/lib/facai8/content/rules"
+import { RECENT_LINKS } from "../../src/lib/facai8/data/recent-links"
 
 // ── 播种行 ID（91 开头，与雪花 ID 档案行段隔离，afterAll 删库自然清理）──
 const L_NOW = "910000000000000001"
@@ -18,6 +21,10 @@ const L_GONE = "910000000000000004"
 const L_GONE_REL = "910000000000000005"
 const L_OK_REL = "910000000000000006"
 const L_DET = "910000000000000007"
+// P8 修复（契约补全）：详情 / 备用链接继承所属链接可见性 —— 三种不可见形态 + 一个公开对照组
+const L_DIS = "910000000000000008"
+const L_DEL = "910000000000000009"
+const L_DM_OK = "910000000000000010"
 const A_PUB = "910000000000000011"
 const A_DRAFT = "910000000000000012"
 const A_FUTURE = "910000000000000013"
@@ -65,6 +72,34 @@ async function seed(): Promise<void> {
     `INSERT INTO site_link_details (link_id, click_count, like_count, annotation, preview_image, detail_html, source_created_at)
      VALUES ('${L_DET}', 0, 0, '', '', '<p>p8 detail</p>', '2099-01-01 00:00:00.000')`,
   )
+
+  // ── P8 修复：详情 / 备用链接可见性继承探针 ──
+  // source_created_at 取 2020-01-01（远早于档案 122 行详情）→ 不挤占 getNewLinks top10 名额
+  await linkIns(L_DIS, "P8VisDisabledProbe", "p8vislinkdis 停用探针", "status = 'disabled'")
+  await linkIns(L_DEL, "P8VisDeletedProbe", "p8vislinkdel 软删探针", "deleted_at = UTC_TIMESTAMP(3)")
+  await linkIns(L_DM_OK, "P8VisPublicProbe", "p8vislinkdmok 公开对照探针", "is_gone = 0")
+  const detIns = (linkId: string): Promise<unknown> =>
+    pool.query(
+      `INSERT INTO site_link_details (link_id, click_count, like_count, annotation, preview_image, detail_html, source_created_at)
+       VALUES ('${linkId}', 7, 3, 'p8 备注', '', '<p>p8 detail ${linkId}</p>', '2020-01-01 00:00:00.000')`,
+    )
+  await detIns(L_DIS)
+  await detIns(L_DEL)
+  await detIns(L_DM_OK)
+  await detIns(L_GONE) // isGone=1 但公开 → 详情与备链必须仍可见（「已失效」徽章语义）
+  const mirIns = (linkId: string, sort: number, name: string): Promise<unknown> =>
+    pool.query("INSERT INTO site_link_mirrors (link_id, name, url, sort_order) VALUES (?, ?, ?, ?)", [
+      linkId,
+      name,
+      `https://p8-mirror.example/${linkId}-${sort}`,
+      sort,
+    ])
+  await mirIns(L_DET, 0, "草稿站备链")
+  await mirIns(L_DIS, 0, "停用站备链")
+  await mirIns(L_DEL, 0, "软删站备链")
+  await mirIns(L_GONE, 0, "失效站备链")
+  await mirIns(L_DM_OK, 1, "公开站备链乙") // sortOrder 乱序插入 → 断言按 (sort_order,id) 归位
+  await mirIns(L_DM_OK, 0, "公开站备链甲")
 
   const artIns = (id: string, title: string, content: string, status: string, pubExpr: string, deleted = false): Promise<unknown> =>
     pool.query(
@@ -219,6 +254,114 @@ describe("相关推荐尊重可见性", () => {
     expect(ids).not.toContain(A_DRAFT)
     expect(ids).not.toContain(A_FUTURE)
     expect(ids).not.toContain(A_SOFT)
+  })
+})
+
+describe("详情 / 备用链接可见性继承所属链接（P8 契约补全：仓库自身必须自洽）", () => {
+  it("getLinkDetail：draft / disabled / 软删 → null（详情行虽在，也不泄漏）", async () => {
+    for (const id of [L_DET, L_DIS, L_DEL]) expect(await repo.getLinkDetail(id)).toBeNull()
+  })
+  it("getLinkMirrors：draft / disabled / 软删 → []（备链行虽在，也不泄漏）", async () => {
+    for (const id of [L_DET, L_DIS, L_DEL]) expect(await repo.getLinkMirrors(id)).toEqual([])
+  })
+  it("公开链接详情非空（logoUrl / categoryName 由链接行与分类派生）；isGone 链接详情仍可见", async () => {
+    const det = await repo.getLinkDetail(L_DM_OK)
+    expect(det).not.toBeNull()
+    expect(det!.id).toBe(L_DM_OK)
+    expect(det!.categoryName).not.toBe("")
+    expect(det!.detail).toContain("p8 detail")
+    const gone = await repo.getLinkDetail(L_GONE)
+    expect(gone).not.toBeNull()
+  })
+  it("备用链接：公开链接按 (sort_order,id) 归位返回；isGone 链接仍返回（「已失效」徽章语义）", async () => {
+    expect((await repo.getLinkMirrors(L_DM_OK)).map((m) => m.name)).toEqual(["公开站备链甲", "公开站备链乙"])
+    expect((await repo.getLinkMirrors(L_GONE)).map((m) => m.name)).toEqual(["失效站备链"])
+  })
+  it("状态翻转即时生效：停用→发布 详情与备链立即出现，再软删立即消失", async () => {
+    expect(await repo.getLinkDetail(L_DIS)).toBeNull()
+    expect(await repo.getLinkMirrors(L_DIS)).toEqual([])
+    await pool.query("UPDATE site_links SET status = 'published' WHERE id = ?", [L_DIS])
+    expect(await repo.getLinkDetail(L_DIS)).not.toBeNull()
+    expect((await repo.getLinkMirrors(L_DIS)).map((m) => m.name)).toEqual(["停用站备链"])
+    await pool.query("UPDATE site_links SET deleted_at = UTC_TIMESTAMP(3) WHERE id = ?", [L_DIS])
+    expect(await repo.getLinkDetail(L_DIS)).toBeNull()
+    expect(await repo.getLinkMirrors(L_DIS)).toEqual([])
+    // 复位为停用态（本文件其他用例的前置）
+    await pool.query("UPDATE site_links SET deleted_at = NULL, status = 'disabled' WHERE id = ?", [L_DIS])
+  })
+  it("非法 ID / 未知 ID：详情 null、备链 []（查无不抛错，与静态侧同语义）", async () => {
+    expect(await repo.getLinkDetail("abc")).toBeNull()
+    expect(await repo.getLinkDetail("99999999999999999")).toBeNull()
+    expect(await repo.getLinkMirrors("abc")).toEqual([])
+    expect(await repo.getLinkMirrors("99999999999999999")).toEqual([])
+  })
+})
+
+describe("首页「最近更新」按链接当前状态与当前字段值刷新（P1 修复）", () => {
+  const snapshotIds = RECENT_LINKS.map((m) => m.id)
+
+  it("纯净导入：与档案快照逐字段恒等，且 getSiteSettings().recentLinks 与 getRecentLinks() 同源一致", async () => {
+    const recent = await repo.getRecentLinks()
+    expect(recent.map((m) => m.id)).toEqual(snapshotIds)
+    expect(recent).toEqual(RECENT_LINKS.map((m) => ({ ...m })))
+    expect((await repo.getSiteSettings()).recentLinks).toEqual(recent)
+  })
+  it("停用（status=disabled）立即从最近更新消失，其余保持快照原序（两个入口同时生效）", async () => {
+    await pool.query("UPDATE site_links SET status = 'disabled' WHERE id = ?", [snapshotIds[1]])
+    const recent = await repo.getRecentLinks()
+    expect(recent.map((m) => m.id)).toEqual(snapshotIds.filter((id) => id !== snapshotIds[1]))
+    expect((await repo.getSiteSettings()).recentLinks.map((m) => m.id)).toEqual(recent.map((m) => m.id))
+    await pool.query("UPDATE site_links SET status = 'published' WHERE id = ?", [snapshotIds[1]])
+    expect((await repo.getRecentLinks()).map((m) => m.id)).toEqual(snapshotIds)
+  })
+  it("软删立即消失，恢复 deleted_at 后立即回来", async () => {
+    await pool.query("UPDATE site_links SET deleted_at = UTC_TIMESTAMP(3) WHERE id = ?", [snapshotIds[2]])
+    expect((await repo.getRecentLinks()).map((m) => m.id)).not.toContain(snapshotIds[2])
+    expect((await repo.getSiteSettings()).recentLinks.map((m) => m.id)).not.toContain(snapshotIds[2])
+    await pool.query("UPDATE site_links SET deleted_at = NULL WHERE id = ?", [snapshotIds[2]])
+    expect((await repo.getRecentLinks()).map((m) => m.id)).toEqual(snapshotIds)
+  })
+  it("改名 / 改链 / 换 Logo / 分类改名：显示数据库当前值，不再吐旧快照文案", async () => {
+    const target = snapshotIds[0]
+    const [[before]] = (await pool.query(
+      "SELECT title, url, logo_path, category_id FROM site_links WHERE id = ?",
+      [target],
+    )) as unknown as [{ title: string; url: string; logo_path: string; category_id: string }[]]
+    await pool.query(
+      "UPDATE site_links SET title = 'P8改名后标题', url = 'https://p8-renamed.example/x', logo_path = '/uploads/p8-new-logo.webp' WHERE id = ?",
+      [target],
+    )
+    await pool.query("UPDATE link_categories SET name = 'P8改名分类' WHERE id = ?", [before.category_id])
+    for (const recent of [await repo.getRecentLinks(), (await repo.getSiteSettings()).recentLinks]) {
+      expect(recent[0]).toEqual({
+        id: target,
+        title: "P8改名后标题",
+        logoUrl: "/uploads/p8-new-logo.webp",
+        url: "https://p8-renamed.example/x",
+        categoryName: "P8改名分类",
+      })
+    }
+    await pool.query(
+      "UPDATE site_links SET title = ?, url = ?, logo_path = ? WHERE id = ?",
+      [before.title, before.url, before.logo_path, target],
+    )
+    await pool.query("UPDATE link_categories SET name = ? WHERE id = ?", [RECENT_LINKS[0].categoryName, before.category_id])
+    expect((await repo.getRecentLinks())[0]).toEqual({ ...RECENT_LINKS[0] })
+  })
+  it("快照里的孤儿 ID（链接已不存在）被剔除，其余条目不受影响（绝不伪造回填）", async () => {
+    const [[orig]] = (await pool.query(
+      "SELECT CAST(setting_value AS CHAR) AS v FROM site_settings WHERE setting_key = 'recent_links'",
+    )) as unknown as [{ v: string }[]]
+    await pool.query(
+      `UPDATE site_settings
+          SET setting_value = JSON_ARRAY_APPEND(setting_value, '$', CAST('{"id":"998877665544332211","title":"孤儿条目","logoUrl":"","url":"https://orphan.example","categoryName":"孤儿分类"}' AS JSON))
+        WHERE setting_key = 'recent_links'`,
+    )
+    const recent = await repo.getRecentLinks()
+    expect(recent.map((m) => m.id)).toEqual(snapshotIds)
+    expect((await repo.getSiteSettings()).recentLinks.map((m) => m.id)).toEqual(snapshotIds)
+    await pool.query("UPDATE site_settings SET setting_value = CAST(? AS JSON) WHERE setting_key = 'recent_links'", [orig.v])
+    expect((await repo.getRecentLinks()).map((m) => m.id)).toEqual(snapshotIds)
   })
 })
 

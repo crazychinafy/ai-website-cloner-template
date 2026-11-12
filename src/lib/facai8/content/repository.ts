@@ -16,7 +16,10 @@
 //     （草稿 / 计划发布 / 软删除行绝不泄漏到前台；时间判断用 DB 时钟 UTC_TIMESTAMP(3)，应用与 DB 无时区偏差）
 //   - ads：status='active' 且 deleted_at IS NULL 且 (starts_at IS NULL OR starts_at <= now)
 //     且 (ends_at IS NULL OR ends_at >= now)
-//   - mirrors：无独立状态列，可见性继承所属链接（行只在链接可见时返回）
+//   - mirrors：无独立状态列，可见性继承所属链接（行只在链接可见时返回；getLinkDetail / getLinkMirrors
+//     在 MySQL 侧各自先验所属链接公开状态——P8 契约补全，不依赖调用方先查 getLinkById）
+//   - recent_links 设置快照：行内容按快照 ID 重读链接当前值并套用 links 谓词（P1 修复）——
+//     停用 / 软删 / 改名改链立即反映到「最近更新」，getSiteSettings 与 getRecentLinks 共用同一过滤
 //   - 静态档案 = 发布态快照（2026-11-08 前全部已发布），天然满足上述谓词 → 静态实现无需再过滤
 //   - 关联/搜索方法内部只对「可见集合」应用规则（rules.ts 同一份纯函数），绝不扫描草稿行
 // 无回退原则：mysql 数据源查询失败一律抛错（P8-8 转 5xx），绝不静默改读静态档案。
@@ -75,9 +78,9 @@ export interface ContentRepository {
   getLinksByTag(tagId: string): Promise<LinkItemDto[]>
   /** 链接主记录；不存在 → null */
   getLinkById(id: string): Promise<LinkItemDto | null>
-  /** 链接详情；源站无档（未收录详情）→ null，绝不伪造 */
+  /** 链接详情；源站无档（未收录详情）→ null，绝不伪造；所属链接不可见（draft/停用/软删）→ null（可见性继承） */
   getLinkDetail(id: string): Promise<LinkDetailDto | null>
-  /** 备用链接（无档 → 空数组，与前台 mirrorsForLink 语义一致） */
+  /** 备用链接（无档 → 空数组，与前台 mirrorsForLink 语义一致）；所属链接不可见 → 空数组（可见性继承） */
   getLinkMirrors(linkId: string): Promise<LinkMirrorDto[]>
 
   // ── 文章 ──
@@ -99,7 +102,10 @@ export interface ContentRepository {
   getRelatedArticlesForLink(linkId: string): Promise<ArticleDto[]>
   /** 首页右栏「最新收录」（= 有详情链接按详情 createdAt 降序 top 10，两实现均按此规则重算） */
   getNewLinks(): Promise<MiniLinkDto[]>
-  /** 首页右栏「最近更新」（源站快照；静态侧读 RECENT_LINKS，MySQL 侧读 site_settings.recent_links JSON） */
+  /**
+   * 首页右栏「最近更新」（源站快照；静态侧读 RECENT_LINKS，MySQL 侧读 site_settings.recent_links JSON）。
+   * MySQL 侧按快照 ID 重读链接当前值并套用公开可见性（P1 修复），保留快照原序；与 getSiteSettings().recentLinks 恒等。
+   */
   getRecentLinks(): Promise<MiniLinkDto[]>
   /** 首页右栏「最新文章」（= 文章 createdAt 降序 top 8） */
   getNewArticles(): Promise<MiniArticleDto[]>

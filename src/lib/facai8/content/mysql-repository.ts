@@ -13,7 +13,7 @@
 //   ≠ 静态侧语义，且 %词% 无法走索引；故搜索 = 可见集全量取 title/description/content 后 JS 过滤
 //   （快照 3791 链接 / 28 文章量级），两侧命中集合与截断序逐位一致。
 // 本模块为纯数据访问层：不含 server-only / 环境变量逻辑，Node 脚本与 vitest 可直接加载（凭据由调用方注入）。
-import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import type { MySql2Database } from "drizzle-orm/mysql2"
 import * as schema from "../../db/schema/index.ts"
 import {
@@ -218,20 +218,23 @@ export class MySqlRepository implements ContentRepository {
   async getLinkDetail(id: string): Promise<LinkDetailDto | null> {
     const num = numId(id)
     if (num === null) return null
+    // P8 修复（契约补全）：详情可见性继承所属链接——非公开（draft / 停用 / 软删）→ null，
+    // 与 getLinkById 同一 linkPublic() 谓词；这条链接行同时用于派生 logoUrl（一次查询两用）。
+    const linkRow = (
+      await this.db.select().from(siteLinks).where(and(eq(siteLinks.id, num), linkPublic()))
+    )[0]
+    if (!linkRow) return null
     const dets = await this.db.select().from(siteLinkDetails).where(eq(siteLinkDetails.linkId, num))
     const det = dets[0]
     if (!det) return null // 源站无档 → null，绝不伪造
     // logoUrl / categoryName 在 P2 schema 无独立列：由链接行 / 分类 join 派生
     //（import 时已验证 122 行源站快照值与派生值恒等 → 无损；详情页低频场景，两次查询可接受）
-    const linkRow = (await this.db.select().from(siteLinks).where(eq(siteLinks.id, num)))[0]
     let categoryName = ""
-    if (linkRow) {
-      const catRow = (await this.db.select().from(linkCategories).where(eq(linkCategories.id, linkRow.categoryId)))[0]
-      categoryName = catRow ? catRow.name : ""
-    }
+    const catRow = (await this.db.select().from(linkCategories).where(eq(linkCategories.id, linkRow.categoryId)))[0]
+    categoryName = catRow ? catRow.name : ""
     return mapLinkDetail(det, {
       linkId: bigToStr(det.linkId) ?? "",
-      logoUrl: linkRow ? linkRow.logoPath : "",
+      logoUrl: linkRow.logoPath,
       categoryName,
     })
   }
@@ -239,6 +242,15 @@ export class MySqlRepository implements ContentRepository {
   async getLinkMirrors(linkId: string): Promise<LinkMirrorDto[]> {
     const num = numId(linkId)
     if (num === null) return []
+    // P8 修复（契约补全）：mirrors 无独立状态列，可见性继承所属链接（repository.ts 头注释）——
+    // 非公开链接的备链行不进前台（页面侧虽有 getLinkById 兜底，仓库契约必须自洽）。
+    const linkRow = (
+      await this.db
+        .select({ id: siteLinks.id })
+        .from(siteLinks)
+        .where(and(eq(siteLinks.id, num), linkPublic()))
+    )[0]
+    if (!linkRow) return []
     const rows = await this.db
       .select()
       .from(siteLinkMirrors)
@@ -374,9 +386,11 @@ export class MySqlRepository implements ContentRepository {
   }
 
   async getRecentLinks(): Promise<MiniLinkDto[]> {
-    // 源站 /api/public/recent-links 快照（site_settings.recent_links JSON；import 时按档案序 1:1 存档）
-    const settings = await this.getSiteSettings()
-    return settings.recentLinks
+    // 源站 /api/public/recent-links 快照（site_settings.recent_links JSON；import 时按档案序 1:1 存档）。
+    // P1 修复：不再原样吐快照——与 getSiteSettings 共用同一过滤/刷新助手（公开可见性 + 当前字段值）。
+    const rows = await this.db.select().from(siteSettings)
+    const settings = mapSiteSettings(rows)
+    return this.filterRecentLinksByCurrent(settings.recentLinks)
   }
 
   async getNewArticles(): Promise<MiniArticleDto[]> {
@@ -455,7 +469,49 @@ export class MySqlRepository implements ContentRepository {
 
   async getSiteSettings(): Promise<SiteSettingsDto> {
     const rows = await this.db.select().from(siteSettings)
-    return mapSiteSettings(rows)
+    const dto = mapSiteSettings(rows)
+    // P1 修复：recent_links 是源站 JSON 快照（site_settings 行），其中链接可能已被后台
+    // 停用 / 软删 / 改名改链 —— 按快照 ID 重读链接当前值并套用公开可见性谓词（与 getRecentLinks 同一助手）。
+    dto.recentLinks = await this.filterRecentLinksByCurrent(dto.recentLinks)
+    return dto
+  }
+
+  /**
+   * 「最近更新」快照 → 前台可见集合（P1 修复，getSiteSettings / getRecentLinks 共用）：
+   * 保留快照原序；按 ID 单查 site_links（linkPublic() 谓词）+ 分类名 join，
+   * 只保留当前仍公开的链接（draft / 停用 / 软删 / 不存在的 ID 被剔除），
+   * 且 title/url/logoUrl/categoryName 一律取数据库当前值（快照字段仅作 ID 与顺序载体）。
+   * 静态侧无需此过滤：档案 = 发布态快照（repository.ts 头注释既有条款）。
+   */
+  private async filterRecentLinksByCurrent(snapshot: MiniLinkDto[]): Promise<MiniLinkDto[]> {
+    const uniqueIds = [...new Set(snapshot.map((m) => m.id))]
+    if (uniqueIds.length === 0) return []
+    const nums = uniqueIds.map((v) => numId(v)).filter((v): v is bigint => v !== null)
+    if (nums.length === 0) return []
+    const rows = await this.db
+      .select({
+        id: siteLinks.id,
+        title: siteLinks.title,
+        url: siteLinks.url,
+        logoPath: siteLinks.logoPath,
+        categoryName: linkCategories.name,
+      })
+      .from(siteLinks)
+      .leftJoin(linkCategories, eq(linkCategories.id, siteLinks.categoryId))
+      .where(and(inArray(siteLinks.id, nums), linkPublic()))
+    const live = new Map(rows.map((r) => [bigToStr(r.id) ?? "", r]))
+    return snapshot
+      .filter((m) => live.has(m.id))
+      .map((m) => {
+        const r = live.get(m.id)!
+        return {
+          id: m.id,
+          title: r.title,
+          logoUrl: r.logoPath,
+          url: r.url,
+          categoryName: r.categoryName ?? "",
+        }
+      })
   }
 
   async getSitePage(pageKey: StaticField): Promise<SitePageDto | null> {

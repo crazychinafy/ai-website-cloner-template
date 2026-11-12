@@ -328,12 +328,13 @@ RBAC：复用 seed 既有 `ads.*`、`lines.*`、`settings.view`/`settings.update
 
 ### 验收
 - [x] static 模式与切换前行为一致（20 个静态数据文件 SHA-256 冻结 20/20、受保护路径 git diff 为空、双渲染 static 侧即现行线上形状）。
-- [x] mysql 模式页面行为与静态基线一致（同一构建双模起服，39 路径归一化 DOM 逐字节 ALL_MATCH 39/39）。
+- [x] mysql 模式页面行为与静态基线一致（同一构建双模起服，39 路径归一化 DOM 逐字节 ALL_MATCH 39/39；P1/P2 可见性修复轮后新构建复跑仍 39/39）。
+- [x] 公开可见性契约自洽（links/articles/bulletins/ads + 详情/备链继承所属链接 + 首页「最近更新」按链接当前状态与当前字段值刷新，getSiteSettings/getRecentLinks 两入口恒等；停用/软删/改名在副本库实况 E2E 下一次请求即生效，6/6）。
 - [x] MySQL 不可用时显示明确 5xx/错误，不静默读取旧静态值（死库实况 E2E：11/11 路径 HTTP 500、响应无静态内容痕迹、`ContentSourceError` 固定消息含 32hex 请求编号并写服务端日志）。
 - [x] 切回 static 可在配置变更和重启后恢复（同一构建仅改 `CONTENT_SOURCE` + 重启即恢复 static，双渲染 3111/3112 双模互证；操作步骤固化在 RUNBOOK §2）。
 - [x] 原始快照未删除（`src/lib/facai8/data/` 原封不动，`scripts/p8-static-hash.mjs` 守卫）。
 
-验收：52 测试文件 / 904 用例全绿（P2–P7 既有 785 用例未删未放宽；P8 新增 `p8-rules` 38、`p8-parity` 56、`p8-visibility` 17、`p8-content-error` 8 共 4 文件 119 用例，真实 MySQL 对照库）；lint/typecheck/build 全绿（前台全部路由动态 ƒ）；P8-7 去重以 `performance_schema` 采样取证（单请求 `site_settings` 恰 1 条 SELECT）；P8-8 浏览器实测 hydration 错误视图 + 请求编号↔日志 digest 关联。交付物：`docs/P8_FRONTEND_MIGRATION_REPORT.md`、`docs/P8_DATA_PARITY_REPORT.md`、`docs/P8_ROLLBACK_RUNBOOK.md`。生产未切换，默认仍 `CONTENT_SOURCE=static`。
+验收：52 测试文件 / 915 用例全绿（P2–P7 既有 785 用例未删未放宽；P8 新增 `p8-rules` 38、`p8-parity` 56、`p8-visibility` 28（含交付后 P1/P2 修复轮 +11）、`p8-content-error` 8 共 4 文件 130 用例，真实 MySQL 对照库；修复轮后全套门禁复跑全绿）；lint/typecheck/build 全绿（前台全部路由动态 ƒ）；P8-7 去重以 `performance_schema` 采样取证（单请求 `site_settings` 恰 1 条 SELECT）；P8-8 浏览器实测 hydration 错误视图 + 请求编号↔日志 digest 关联。交付物：`docs/P8_FRONTEND_MIGRATION_REPORT.md`、`docs/P8_DATA_PARITY_REPORT.md`、`docs/P8_ROLLBACK_RUNBOOK.md`。生产未切换，默认仍 `CONTENT_SOURCE=static`。
 
 ## P9：安全、发布和运维
 
