@@ -56,6 +56,18 @@ export type AdminErrorCode =
   | "LINE_STATUS_TRANSITION"
   | "SETTINGS_KEY_UNKNOWN"
   | "SETTINGS_MEDIA_MISSING"
+  // P7：审计/导入管理业务错误码（导入执行安全门：锁/确认/校验和/生产开关）
+  | "IMPORT_LOCKED"
+  | "IMPORT_REFUSED"
+  | "IMPORT_FAILED"
+  | "IMPORT_DB_NAME_MISMATCH"
+  | "IMPORT_CHECKSUM_MISMATCH"
+  | "IMPORT_VERSION_MISMATCH"
+  | "IMPORT_PREVIEW_REQUIRED"
+  | "IMPORT_CONFIRM_REQUIRED"
+  | "IMPORT_PROD_DISABLED"
+  | "IMPORT_RUN_NOT_FOUND"
+  | "AUDIT_RUN_NOT_FOUND"
 
 export function ok(data: unknown, init?: { status?: number; headers?: Record<string, string> }): Response {
   return Response.json(

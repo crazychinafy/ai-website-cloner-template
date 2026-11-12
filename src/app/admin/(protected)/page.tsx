@@ -1,73 +1,21 @@
-// /admin（P5 后台首页 = 框架欢迎页 + 真实系统状态）
+// /admin（P7 工作台）：真实 DB 统计仪表盘（无虚构数字，§2）
 // ─────────────────────────────────────────────────────────────────
-// 不伪造任何统计（无 PV/UV/收入等虚构数字，§2）：
-// - 系统状态卡片：数据源（CONTENT_SOURCE 真实 env）、会话、导入记录（admin_import_runs 真实行）
-// - 权限表：当前 Session 的真实权限（服务端每次请求实时加载）
-// - 模块总览：真实导航配置（已实现/待开放）
+// - 统计数字全部来自 dashboard-service（SQL COUNT 聚合、单往返、按 Session 权限过滤）
+// - 每个指标带「口径」标注；数据库异常显示「数据库连接异常/统计暂不可用」而非 0
+// - 权限字典数量为 admin_permissions 实时 COUNT（修复旧版硬编码「权限 46 项」）
+// - 最近导入 = ORDER BY id DESC LIMIT 1（修复旧版 count+offset 竞态）
+// - 模块总览与权限表沿用真实导航配置与真实 Session 数据
 import { requireAdminPage } from "@/lib/admin/auth/guards.ts"
 import { getContentSource } from "@/lib/admin/validation/env"
+import { getDashboardData, DB_UNAVAILABLE_TEXT } from "@/lib/admin/services/dashboard-service.ts"
+import type { DashboardMetric } from "@/lib/admin/services/dashboard-service.ts"
 import { ADMIN_NAV, buildNav, isNavGroup } from "@/lib/admin/ui/navigation"
 import { PermissionsTable } from "@/components/admin/home/PermissionsTable"
 import { StatusBadge } from "@/components/admin/feedback/StatusBadge"
-import { sql } from "drizzle-orm"
 import { getDrizzle } from "@/lib/db/client"
-import { adminImportRuns } from "@/lib/db/schema"
 import { adminRoles } from "@/lib/db/schema/admin-rbac.ts"
-import { adminUsers } from "@/lib/db/schema/admin.ts"
 
 export const metadata = { title: "工作台 - 彩搜搜后台" }
-
-interface ImportStatus {
-  total: number
-  latest: { snapshotVersion: string; status: string; startedAt: string } | null
-}
-
-/** 读取真实导入状态（DB 不可用时优雅降级，不阻塞首页） */
-async function readImportStatus(): Promise<ImportStatus> {
-  try {
-    const db = getDrizzle()
-    const [countRow] = await db
-      .select({ c: sql<number>`count(*)` })
-      .from(adminImportRuns)
-      .limit(1)
-    const total = Number(countRow?.c ?? 0)
-    if (total === 0) return { total, latest: null }
-    const rows = await db
-      .select({
-        snapshotVersion: adminImportRuns.snapshotVersion,
-        status: adminImportRuns.status,
-        startedAt: adminImportRuns.startedAt,
-      })
-      .from(adminImportRuns)
-      .orderBy(adminImportRuns.id)
-      .limit(1)
-      .offset(Math.max(0, total - 1))
-    const r = rows[0]
-    return {
-      total,
-      latest: r ? { snapshotVersion: r.snapshotVersion, status: r.status, startedAt: r.startedAt } : null,
-    }
-  } catch {
-    return { total: 0, latest: null }
-  }
-}
-
-/** 真实管理员/角色规模（只读；DB 不可用时为 0 显示"不可用"） */
-async function readAdminScale() {
-  try {
-    const db = getDrizzle()
-    const [u, r] = await Promise.all([
-      db.select({ c: sql<number>`count(*)` }).from(adminUsers).limit(1),
-      db.select({ c: sql<number>`count(*)` }).from(adminRoles).limit(1),
-    ])
-    return {
-      admins: Number(u[0]?.c ?? 0),
-      roles: Number(r[0]?.c ?? 0),
-    }
-  } catch {
-    return null
-  }
-}
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -78,25 +26,38 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   )
 }
 
+function MetricTile({ metric }: { metric: DashboardMetric }) {
+  return (
+    <div className="rounded-md border border-border/70 bg-background/60 p-4">
+      <p className="text-2xl font-semibold text-foreground tabular-nums">
+        {metric.value.toLocaleString("zh-CN")}
+        <span className="ml-2 text-xs font-normal text-muted-foreground">{metric.label}</span>
+      </p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{metric.caliber}</p>
+    </div>
+  )
+}
+
 export default async function AdminHomePage() {
   const admin = await requireAdminPage()
-  const [importStatus, scale] = await Promise.all([readImportStatus(), readAdminScale()])
+  const [dash, roleRows] = await Promise.all([
+    getDashboardData(admin.permissions),
+    (async () => {
+      try {
+        const db = getDrizzle()
+        return await db.select({ code: adminRoles.code, name: adminRoles.name }).from(adminRoles).limit(20)
+      } catch {
+        return [] as { code: string; name: string }[]
+      }
+    })(),
+  ])
   const contentSource = getContentSource()
   const visibleNav = buildNav(admin.permissions)
-  const roleRows = await (async () => {
-    try {
-      const db = getDrizzle()
-      return await db
-        .select({ code: adminRoles.code, name: adminRoles.name })
-        .from(adminRoles)
-        .limit(20)
-    } catch {
-      return [] as { code: string; name: string }[]
-    }
-  })()
   const roleNames = new Map(
     roleRows.filter((r) => admin.roles.includes(r.code)).map((r) => [r.code, r.name] as const),
   )
+  const canSeeRuns = admin.permissions.includes("imports.preview")
+  const canSeeSystem = dash.system.length > 0
 
   return (
     <div className="space-y-6">
@@ -122,8 +83,15 @@ export default async function AdminHomePage() {
             )}
           </p>
         </div>
-        <StatusBadge tone="neutral">独立后台框架 · P5</StatusBadge>
+        <StatusBadge tone="neutral">独立后台框架 · P7</StatusBadge>
       </div>
+
+      {/* 数据库状态横幅：异常时明确告知，不以 0 冒充数据 */}
+      {!dash.dbOk && (
+        <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {DB_UNAVAILABLE_TEXT}
+        </p>
+      )}
 
       {/* 系统状态（全部为真实数据） */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -144,40 +112,69 @@ export default async function AdminHomePage() {
           <p className="text-xs leading-5 text-muted-foreground">HttpOnly Cookie 服务端 Session；权限每次请求实时校验。</p>
         </Card>
         <Card title="快照导入">
-          {importStatus.latest ? (
+          {canSeeRuns ? (
+            dash.dbOk ? (
+              dash.latestRun ? (
+                <>
+                  <p className="text-sm text-foreground">
+                    最近一次（#{dash.latestRun.id}）：
+                    <StatusBadge tone={dash.latestRun.status === "succeeded" ? "success" : "danger"}>
+                      {dash.latestRun.status}
+                    </StatusBadge>
+                  </p>
+                  <p className="text-xs leading-5 text-muted-foreground break-all">
+                    {dash.latestRun.snapshotVersion} · {dash.latestRun.startedAt}（UTC）· 共 {dash.runsTotal} 次（成功{" "}
+                    {dash.runsSucceeded} 次）· 口径：admin_import_runs 按 id 倒序最新 1 条
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs leading-5 text-muted-foreground">
+                  尚无导入记录（后台「数据导入」或 P4 CLI 执行后生成）
+                </p>
+              )
+            ) : (
+              <p className="text-xs leading-5 text-muted-foreground">{DB_UNAVAILABLE_TEXT}</p>
+            )
+          ) : (
+            <p className="text-xs leading-5 text-muted-foreground">无查看权限（需 imports.preview）</p>
+          )}
+        </Card>
+        <Card title="管理员规模">
+          {canSeeSystem && dash.dbOk ? (
             <>
-              <p className="text-sm text-foreground">
-                最近一次：
-                <StatusBadge tone={importStatus.latest.status === "succeeded" ? "success" : "danger"}>
-                  {importStatus.latest.status}
-                </StatusBadge>
+              <p className="text-2xl font-semibold text-foreground tabular-nums">
+                {(dash.system.find((m) => m.key === "admins")?.value ?? 0).toLocaleString("zh-CN")}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">名管理员</span>
               </p>
-              <p className="text-xs leading-5 text-muted-foreground break-all">
-                {importStatus.latest.snapshotVersion} · {importStatus.latest.startedAt}（UTC）· 共 {importStatus.total} 次
+              <p className="text-xs leading-5 text-muted-foreground">
+                角色 {(dash.system.find((m) => m.key === "roles")?.value ?? 0).toLocaleString("zh-CN")} 个 · 权限{" "}
+                {(dash.system.find((m) => m.key === "permissions")?.value ?? 0).toLocaleString("zh-CN")} 项 ·
+                口径：admin_users / admin_roles / admin_permissions 实时 COUNT
               </p>
             </>
           ) : (
             <p className="text-xs leading-5 text-muted-foreground">
-              {scale === null ? "导入记录不可用（数据库连接异常）" : "尚无导入记录（P4 导入脚本执行后生成）"}
+              {canSeeSystem ? DB_UNAVAILABLE_TEXT : "无查看权限（需 administrators.read）"}
             </p>
           )}
         </Card>
-        <Card title="管理员规模">
-          {scale ? (
-            <>
-              <p className="text-2xl font-semibold text-foreground tabular-nums">
-                {scale.admins}
-                <span className="ml-1 text-xs font-normal text-muted-foreground">名管理员</span>
-              </p>
-              <p className="text-xs leading-5 text-muted-foreground">
-                角色 {scale.roles} 个（含 4 个系统角色）· 权限 46 项
-              </p>
-            </>
-          ) : (
-            <p className="text-xs leading-5 text-muted-foreground">不可用（数据库连接异常）</p>
-          )}
-        </Card>
       </div>
+
+      {/* 内容数据统计（P7：按 Session 权限过滤；每项带口径标注；DB 异常显示不可用而非 0） */}
+      <section className="rounded-lg border border-border bg-card p-5">
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">内容数据统计（按你的权限显示）</h2>
+        {!dash.dbOk ? (
+          <p className="text-sm text-muted-foreground">{DB_UNAVAILABLE_TEXT}</p>
+        ) : dash.content.length === 0 ? (
+          <p className="text-sm text-muted-foreground">当前权限未包含任何内容模块的 read 权限，无可统计项。</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {dash.content.map((m) => (
+              <MetricTile key={m.key} metric={m} />
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* 模块总览（真实导航配置：已实现/待开放） */}
       <section className="rounded-lg border border-border bg-card p-5">

@@ -21,6 +21,8 @@ import { siteLinkDetails } from "../../src/lib/db/schema/index.ts"
 import { StaticSnapshotRepository } from "../../src/lib/facai8/content/static-repository.ts"
 import { MySqlRepository } from "../../src/lib/facai8/content/mysql-repository.ts"
 import type { ContentRepository } from "../../src/lib/facai8/content/repository.ts"
+// P7：deepEqual/diffPositions 抽取至共享比对模块（后台导入差异预览共用同一实现）
+import { deepEqual, diffPositions } from "../../src/lib/admin/import/import-compare.ts"
 
 const envSchema = z.object({
   DB_HOST: z.string().min(1).default("127.0.0.1"),
@@ -69,32 +71,6 @@ interface VerifyReport {
 
 function idOf(r: AnyRecord, key: string): string {
   return String(r[key] ?? "")
-}
-
-/** 序列比对（ID 序列）；返回差异位置数 */
-function diffPositions(a: string[], b: string[]): number {
-  const n = Math.max(a.length, b.length)
-  let d = 0
-  for (let i = 0; i < n; i++) if ((a[i] ?? "∅") !== (b[i] ?? "∅")) d++
-  return d
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true
-  if (typeof a !== typeof b) return false
-  if (a === null || b === null) return false
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false
-    return a.every((x, i) => deepEqual(x, b[i]))
-  }
-  if (typeof a === "object") {
-    if (typeof b !== "object" || Array.isArray(b)) return false
-    const ka = Object.keys(a as AnyRecord)
-    const kb = Object.keys(b as AnyRecord)
-    if (ka.length !== kb.length) return false
-    return ka.every((k) => (a as AnyRecord)[k] === (b as AnyRecord)[k] || deepEqual((a as AnyRecord)[k], (b as AnyRecord)[k]))
-  }
-  return false
 }
 
 function compareList(

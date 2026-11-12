@@ -481,10 +481,11 @@
 | POST | /api/admin/v1/lines/[id]/restore | 线路恢复（保留原状态与排序）（P6D） |
 | POST | /api/admin/v1/lines/reorder | 线路排序（全局作用域，body 拒绝 position）（P6D） |
 | GET/PATCH | /api/admin/v1/settings | 站点设置（P6D 已实现：GET `{settings:{key:{value,version}}}`；PATCH `{items:[{key,value,version}]}` 单事务全有或全无） |
-| GET | /api/admin/v1/audit-logs | 审计查询 |
-| POST | /api/admin/v1/imports/preview | 导入预检 |
-| POST | /api/admin/v1/imports | 执行导入 |
-| GET | /api/admin/v1/imports/[id] | 导入状态 |
+| GET | /api/admin/v1/audit-logs | 审计查询（P7 已实现：只读；page/pageSize∈{20,50,100}、q/actorUserId/action/resourceType/resourceId/requestId/startDate/endDate、sortBy∈{createdAt,id} 白名单默认 createdAt DESC+id DESC；操作人 join 缺失显示「已删除管理员」；before/after 读取时兜底脱敏；无 PUT/PATCH/DELETE——405） |
+| GET | /api/admin/v1/imports | 导入历史列表（P7 已实现：imports.preview；q/mode/status/snapshotVersion/日期/pageSize∈{20,50,100}/sortBy∈{startedAt,id}；errorSummary 读取时脱敏并截断 2000；CLI 行 startedBy=null，幽灵发起人 startedByDeleted=true） |
+| POST | /api/admin/v1/imports/preview | 导入预检（P7 已实现：imports.preview + CSRF；零写入——不写 admin_import_runs、不写审计；DTO 全部服务端可信：snapshotVersion/checksum/targetDatabase/isProduction/productionAllowed/priorSucceeded/noOpMatched/executable/blockedReason；客户端 body 被忽略；不存在 GET——405） |
+| POST | /api/admin/v1/imports | 执行导入（P7 已实现：imports.execute + CSRF + 预览回执 snapshotVersion/checksum 校验(409) + confirmDatabase 手输精确匹配(422) + 生产双因子 confirmProduction+ADMIN_IMPORT_ALLOW_PRODUCTION(409) + MySQL GET_LOCK 命名锁互斥(409 IMPORT_LOCKED)；成功审计在内容事务内；no-op 审计引用 matched_run_id） |
+| GET | /api/admin/v1/imports/[id] | 导入记录详情（P7 已实现：imports.preview 只读；404 IMPORT_RUN_NOT_FOUND；无 PUT/DELETE——405） |
 
 分页参数：
 - page：从 1 开始。

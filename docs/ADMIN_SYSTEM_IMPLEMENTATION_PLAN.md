@@ -297,16 +297,16 @@ RBAC：复用 seed 既有 `ads.*`、`lines.*`、`settings.view`/`settings.update
 
 > 开发库遗留（供验收复核）：`facai8_admin` 保留走查记录 `P6D走查_UI新建广告`（active、sortOrder=14）与 `P6D走查_UI新建线路`（disabled、sortOrder=4）；`site_settings` 中 `footer_text` v3（默认值「搜你一切想搜」，曾外部改动+冲突回取）、`ads_random` v3（true）。开发环境注意：`.env` 未含 `ADMIN_CSRF_SECRET` 时 CSRF HMAC 密钥每进程随机（dev 回退），Turbopack 热重编译会导致刷新后写请求 403——本地走查需显式注入固定 dev 密钥。
 
-## P7：仪表盘、审计、导入
+## P7：仪表盘、审计、导入（已完成，2026-11-12）
 
-- [ ] 仪表盘仅展示真实统计。
-- [ ] 审计日志只读筛选。
-- [ ] 写操作记录 actor/action/resource/before/after/requestId/IP。
-- [ ] 日志脱敏。
-- [ ] 导入预检、差异展示、确认导入和历史记录。
-- [ ] 破坏性动作强制二次确认。
+- [x] 仪表盘仅展示真实统计（单条 `SELECT (subquery) as key` 聚合 COUNT，无 N+1、无虚构数字；每卡带口径标签；DB 不可用显示「数据库连接异常/统计暂不可用」，绝不显示 0；指标按会话权限过滤；「权限 46 项」为实时 COUNT 不再硬编码；最近导入按 id 倒序单行查询不再 count+offset）。
+- [x] 审计日志只读筛选（GET /api/admin/v1/audit-logs + /admin/audit-logs 页；全部过滤参数 zod 校验、sortBy 白名单 createdAt|id（默认 createdAt DESC, id DESC）、pageSize∈{20,50,100}；操作人 leftJoin 已删除显示「已删除管理员」不丢行；IP VARBINARY(16) 以 SQL `hex()` 读出并解码 IPv4/IPv6/IPv4-mapped，NULL 显示「—」；不存在编辑/删除/清账入口）。
+- [x] 写操作记录 actor/action/resource/before/after/requestId/IP（P3 writeAudit 契约延续；P6A–P6D 全部 CRUD 已接；P7 新增 import.execute 审计且成功审计在内容事务内——审计失败 → 内容回滚，杜绝误导性成功日志）。
+- [x] 日志脱敏（统一 redactor 写入前 + 读取后双保险：递归对象/数组，深度 16 / 列表 200 / 字符串 8192 上限，循环引用与超限打标记，脱敏异常 fail-closed 隐藏原值；密钥键名 pin/otp/auth 精确匹配 + authorization/session/signature 子串；自由文本 `api_key="x"` / `key=value` 形态一并遮蔽；详情页纯 `<pre>` 展示，无 innerHTML）。
+- [x] 导入预检、差异展示、确认导入和历史记录（复用 P4 核心 `static-import-core.ts` + 新差异引擎 `import-compare.ts`（13 表、missing/extra/changed/order_changed/relation_error 五类差异，列表上限 100 + truncated 标志）；预览零写入已测（runs/审计行数一字不变）；执行需预览回执 + 手输库名 + 命名锁；历史只读列表/详情/筛选/分页，CLI 行与已删发起人形态覆盖）。
+- [x] 破坏性动作强制二次确认（执行导入：服务端 preview 回执 snapshotVersion+checksum 不可被客户端覆盖(409) → confirmDatabase 手输与服务端库名精确匹配(422) → 生产环境额外 confirmProduction 勾选 + ADMIN_IMPORT_ALLOW_PRODUCTION=1 环境变量双因子(409) → MySQL GET_LOCK `facai8_import_<db>` 跨进程互斥(409 IMPORT_LOCKED)）。
 
-验收：所有 CRUD 有日志；失败事务不产生误导性的成功日志；导入记录完整。
+验收：48 测试文件 / 785 用例全绿（P7 新增 9 文件 101 用例，真实 MySQL scratch 库 `facai8_p7_test`；含 4182 行真实导入 → runs 行 started_by 为真实管理员 ID、重跑 no_op 引用 matched_run_id、GET_LOCK 占用 → 409 后锁即时释放）；lint/typecheck/build 全绿；浏览器走查 3 页零控制台错误（工作台真实统计+口径、操作日志筛选/详情脱敏 `<pre>`/`::1` IP 解码、数据导入预览差异明细/禁用执行/CLI 历史详情）；前台冻结：`src/lib/facai8/data/` git diff 为空，10 条前台路由 200。
 
 ## P8：前台数据源切换（最后执行）
 

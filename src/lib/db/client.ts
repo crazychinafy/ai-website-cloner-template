@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events"
 import { drizzle } from "drizzle-orm/mysql2"
 import type { MySql2Database } from "drizzle-orm/mysql2"
 import { getAdminEnv } from "@/lib/admin/validation/env"
+import { binaryColumnCast } from "@/lib/db/mysql-cast"
 import * as schema from "@/lib/db/schema"
 
 type AppDb = MySql2Database<typeof schema>
@@ -40,6 +41,8 @@ export function getDb(): Pool {
     connectTimeout: 10_000,
     charset: "UTF8MB4_UNICODE_CI",
     namedPlaceholders: false,
+    // VARBINARY 列（审计 IP）按原始字节回读：utf8 连接下 mysql2 文本解码会毁掉 ≥0x80 字节
+    typeCast: binaryColumnCast,
   })
   // mysql2 的 Pool 事件类型未暴露通用 "error" 重载：按 EventEmitter 注册连接级错误监听
   ;(pool as unknown as EventEmitter).on("error", (err: Error & { code?: string }) => {
