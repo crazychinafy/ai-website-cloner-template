@@ -1,11 +1,11 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
-import type { Article } from '@/lib/facai8/data/articles'
+import type { ArticleDto } from '@/lib/facai8/content/types'
 import { asset, firstChar, fmtDate } from '@/lib/facai8/util'
 
 // 文章卡片（.art-card：封面 + 标题 + 作者/浏览/日期）
-export function ArtCard({ a }: { a: Article }) {
+export function ArtCard({ a }: { a: ArticleDto }) {
   const cover = a.coverImage ? asset(a.coverImage) : null
   const avatar = a.authorAvatar ? asset(a.authorAvatar) : null
   return (

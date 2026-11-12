@@ -4,9 +4,11 @@ import { bigint, datetime, int, json, longtext, mysqlEnum, mysqlTable, varchar }
 import { adminUsers } from "./admin.ts"
 
 // 站点设置：setting_key 即业务主键（如 site_name / footer_text）
+// P6D：加 version 列（逐 key 乐观锁；API DTO 合同仍是整数 version，由 Service 从列映射）
 export const siteSettings = mysqlTable("site_settings", {
   settingKey: varchar("setting_key", { length: 100 }).notNull().primaryKey(),
   settingValue: json("setting_value").notNull(),
+  version: int("version", { unsigned: true }).notNull().default(1),
   updatedBy: bigint("updated_by", { mode: "bigint", unsigned: true }).references(() => adminUsers.id, {
     onDelete: "set null",
   }),

@@ -77,6 +77,40 @@ export async function getArticleCategoryById(exec: Executor, id: string): Promis
   return r ? toArticleCategoryDto(r.row, r.articleCount) : null
 }
 
+/** 写路径分类行锁需要的最小字段（整改问题 02） */
+export interface ArticleCategoryBrief {
+  id: string
+  name: string
+  status: string
+  deletedAt: string | null
+}
+
+/**
+ * 分类行锁（SELECT ... FOR UPDATE；整改问题 02）。
+ * - 锁定读永远看到最新已提交行并阻塞并发停用/软删除，关闭文章
+ *   「create/update/publish/restore 检查后 → 写前」分类状态被改的 TOCTOU
+ * - 锁序约定：文章事务一律「先锁 articles 自身行，再锁本行」（create 无
+ *   自身行、首锁分类行），与 article-repository 头注释同序，无反序不死锁
+ * - 仅在事务内调用（池上 SELECT ... FOR UPDATE 立即释放，无保护语义）
+ */
+export async function lockArticleCategoryBriefForUpdate(exec: Executor, id: string): Promise<ArticleCategoryBrief | null> {
+  const db = asExecutor(exec)
+  const rows = await db
+    .select({
+      id: articleCategories.id,
+      name: articleCategories.name,
+      status: articleCategories.status,
+      deletedAt: articleCategories.deletedAt,
+    })
+    .from(articleCategories)
+    .where(eq(articleCategories.id, BigInt(id)))
+    .limit(1)
+    .for("update")
+  const r = rows[0]
+  if (!r) return null
+  return { id: r.id.toString(), name: r.name, status: r.status, deletedAt: r.deletedAt ?? null }
+}
+
 /** 本分类的文章引用数（含软删除文章；删除保护） */
 export async function countArticlesByCategoryIds(exec: Executor, ids: string[]): Promise<Map<string, number>> {
   if (ids.length === 0) return new Map()

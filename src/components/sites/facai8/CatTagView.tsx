@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import type { LinkItem } from '@/lib/facai8/data/links'
+import type { LinkItemDto, TagDto } from '@/lib/facai8/content/types'
 import { LinkCard } from './LinkCard'
 import { NotFound } from './NotFound'
 import { PageJump } from './PageJump'
@@ -19,13 +19,14 @@ interface Props {
   id: string
   numeric: boolean // /^\d+$/ 守卫
   item: CatTagItem | null // null = 查无此分类/标签 → in-page 404
-  links: LinkItem[] // 该 id 全部链接（档案序；服务端已过滤）
+  links: LinkItemDto[] // 该 id 全部链接（分类/标签规范序；服务端仓库已过滤可见性）
+  tagsById: Record<string, TagDto> // P8-4：标签徽标数据由服务端注入
 }
 
 // 源站 CategoryPage / TagPage 本地等价：数据静态（无 loading/error/bootloader 分支），
 // 仅保留 404（in-page NotFound type:link）+ 空态 + 54/页客户端分页。
 // 结构同源：container.catpage > catpage-hero(图标+标题+计数) + cat-section > side-flip-wrap > link-container.grid + 分页器。
-export function CatTagView({ mode, numeric, item, links }: Props) {
+export function CatTagView({ mode, numeric, item, links, tagsById }: Props) {
   const [page, setPage] = useState(0)
   const [busy, setBusy] = useState(false)
 
@@ -103,7 +104,7 @@ export function CatTagView({ mode, numeric, item, links }: Props) {
           <div className="side-flip-wrap">
             <div className="link-container grid">
               {cur.map((l) => (
-                <LinkCard key={l.id} l={l} showRatingBadge={isCat} />
+                <LinkCard key={l.id} l={l} showRatingBadge={isCat} tagsById={tagsById} />
               ))}
             </div>
           </div>

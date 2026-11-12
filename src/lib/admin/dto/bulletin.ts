@@ -10,6 +10,8 @@ export interface BulletinDto {
   id: string
   title: string
   contentHtml: string
+  /** 服务端 Sanitizer 就地净化出的编辑器安全正文（整改问题 01，见文章 DTO 同名字段） */
+  editorHtml: string
   status: BulletinStatus
   sortOrder: number
   publishedAt: string | null

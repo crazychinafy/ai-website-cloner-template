@@ -2,8 +2,10 @@
 // ─────────────────────────────────────────────────────────────────
 // - URL 服务端校验（任务书 §P6B「URL scheme 校验」）：只允许 http/https，拒绝
 //   javascript:/data:/file:/vbscript: 与控制字符；禁账号密码段（SSRF/信息泄漏面收敛）
-// - Logo/预览图：受控路径（站内 / 开头）或 http(s) 绝对链接（兼容 1 条历史快照行），
-//   不做服务端自动抓取远端 URL（SSRF 禁令，任务书全局约束）
+// - Logo/预览图：站内受控素材路径（前缀白名单+已知后缀，禁穿越/查询串）或
+//   http(s) 绝对链接（兼容 1 条历史快照行）——统一委托 validation/media-path.ts
+//   （问题 03：与封面/头像/正文图片同一策略源）；不做服务端自动抓取远端 URL
+//   （SSRF 禁令，任务书全局约束）
 // - 状态机不在 PATCH 中：普通编辑改不了 status（发布/下架/停用必须走 /status 端点，
 //   需要 links.publish 权限）；POST 恒为 draft
 // - 聚合 PATCH 合同：detail 省略=不改、null=删除详情、对象=upsert；
@@ -11,6 +13,7 @@
 import { z } from "zod"
 import { bigintIdSchema } from "./list-query.ts"
 import { sortOrderSchema, versionSchema } from "./content-fields.ts"
+import { checkHttpUrl, mediaSrcError } from "./media-path.ts"
 
 // ── 状态 ─────────────────────────────────────────────────────────
 export const LINK_STATUS_VALUES = ["draft", "published", "disabled"] as const
@@ -24,26 +27,8 @@ export const linkStatusChangeSchema = z.object({
 })
 
 // ── 字段级构件 ───────────────────────────────────────────────────
-const CONTROL_RE = /[\u0000-\u0020\u007f]/
-const URL_BAD_CHAR_RE = /[<>"'`\\\s]/
-
-/** 校验 URL 结构（调用方保证已 trim/长度）；返回 issue 文案或 null */
-export function checkHttpUrl(v: string): string | null {
-  if (CONTROL_RE.test(v)) return "地址包含非法控制字符"
-  if (URL_BAD_CHAR_RE.test(v)) return "地址包含非法字符"
-  let u: URL
-  try {
-    u = new URL(v)
-  } catch {
-    return "地址必须是完整的 http(s) 链接"
-  }
-  if (u.protocol !== "http:" && u.protocol !== "https:") return "只允许 http / https 协议"
-  if (u.username || u.password) return "地址不能包含账号密码"
-  const host = u.hostname
-  if (!host || host.length > 253) return "地址主机名不合法"
-  if (!/^[a-z0-9.\-[\]:]+$/.test(host)) return "地址主机名包含非法字符"
-  return null
-}
+// checkHttpUrl 已收敛到 media-path.ts（问题 03：单一事实源）；此处 re-export 兼容旧调用方
+export { checkHttpUrl }
 
 /** 跳转地址：必填完整 http(s) URL（列长 2048） */
 export const httpUrlSchema = z
@@ -57,19 +42,15 @@ export const httpUrlSchema = z
   })
 
 /**
- * Logo / 预览图路径：空串 = 无图；站内根路径（/uploads/...）；
- * http(s) 绝对链接（历史快照存在 1 条绝对 Logo，编辑保存需原样回传）。
- * 拒绝协议相对 //（防协议混淆）、反斜杠与控制字符。
+ * Logo / 预览图路径：空串 = 无图；站内受控素材路径（前缀白名单 + 已知图片/视频
+ * 后缀，禁 .. 穿越与查询串）；http(s) 绝对链接（历史快照存在 1 条绝对 Logo，
+ * 编辑保存需原样回传；策略见 media-path.ts）。
+ * 拒绝协议相对 //（防协议混淆）、反斜杠与控制字符、相对路径。
  */
 export function mediaPathSchema(label: string, max: number) {
   return z.string().trim().max(max, `${label}不能超过 ${max} 个字符`).superRefine((v, ctx) => {
-    if (v === "") return
-    if (CONTROL_RE.test(v) || v.includes("\\"))
-      ctx.addIssue({ code: "custom", message: `${label}包含非法字符` })
-    else if (v.startsWith("//")) ctx.addIssue({ code: "custom", message: `${label}不支持协议相对链接（// 开头）` })
-    else if (v.startsWith("/")) return
-    else if (!checkHttpUrl(v)) return
-    else ctx.addIssue({ code: "custom", message: `${label}必须是站内路径（/ 开头）或 http(s) 链接` })
+    const msg = mediaSrcError(v, label)
+    if (msg) ctx.addIssue({ code: "custom", message: msg })
   })
 }
 

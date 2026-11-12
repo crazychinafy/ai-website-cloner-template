@@ -65,7 +65,9 @@ function toForm(r: ArticleDto): FormState {
   return {
     title: r.title,
     categoryId: r.categoryId,
-    contentHtml: r.contentHtml,
+    // 整改问题 01：contentEditable 只灌服务端净化出的 editorHtml（历史正文可能
+    // 含未清洗的事件属性）；库内原文见 r.contentHtml（只读展示用）
+    contentHtml: r.editorHtml,
     coverImage: r.coverImage,
     seoTitle: r.seoTitle,
     seoKeywords: r.seoKeywords,
@@ -157,7 +159,8 @@ export function ArticleEditor({ mode, articleId, csrfToken, canPublish, canDelet
   function appliedRecord(r: ArticleDto) {
     setRecord(r)
     setInitial(toForm(r))
-    setForm((f) => toForm({ ...r, contentHtml: f.contentHtml }))
+    // 保存成功后采纳服务端元信息，但保留编辑器当前内容（toForm 读 editorHtml——问题 01）
+    setForm((f) => toForm({ ...r, editorHtml: f.contentHtml }))
     setVersion(r.version)
     setStatus(r.status)
   }
@@ -220,8 +223,9 @@ export function ArticleEditor({ mode, articleId, csrfToken, canPublish, canDelet
       setRecord((cur) => (cur ? { ...cur, ...res.data } : cur))
       if (res.data.contentHtml !== form.contentHtml) {
         // 发布闸门可能顺带收敛了未清洗正文——同步编辑器，避免下次保存回写旧值
-        setForm((f) => ({ ...f, contentHtml: res.data!.contentHtml }))
-        setInitial((i) => ({ ...i, contentHtml: res.data!.contentHtml }))
+        // （问题 01：编辑器状态始终用服务端净化出的 editorHtml）
+        setForm((f) => ({ ...f, contentHtml: res.data!.editorHtml }))
+        setInitial((i) => ({ ...i, contentHtml: res.data!.editorHtml }))
       }
       toast.success(`「${record.title}」已${label}`)
     } else {
@@ -382,7 +386,7 @@ export function ArticleEditor({ mode, articleId, csrfToken, canPublish, canDelet
           >
             <RichTextEditor
               id="article-content"
-              initialHtml={record ? record.contentHtml : ""}
+              initialHtml={record ? record.editorHtml : ""}
               onChange={(html) => setField("contentHtml", html)}
               disabled={submitting || deleted}
               onRequestPreview={(html) => requestPreview(html)}

@@ -158,6 +158,8 @@ export type LinkBrief = {
   isGone: boolean
   status: "draft" | "published" | "disabled"
   sortOrder: number
+  /** P8-0：标签组内稠密排名（可为 null = 未经导入/回填/后台维护） */
+  tagSortOrder: number | null
   version: number
   deletedAt: string | null
 }
@@ -182,6 +184,7 @@ export async function lockLinkForUpdate(exec: Executor, id: string): Promise<Lin
       isGone: siteLinks.isGone,
       status: siteLinks.status,
       sortOrder: siteLinks.sortOrder,
+      tagSortOrder: siteLinks.tagSortOrder,
       version: siteLinks.version,
       deletedAt: siteLinks.deletedAt,
     })
@@ -202,6 +205,7 @@ export async function lockLinkForUpdate(exec: Executor, id: string): Promise<Lin
     isGone: r.isGone,
     status: r.status,
     sortOrder: r.sortOrder,
+    tagSortOrder: r.tagSortOrder ?? null,
     version: r.version,
     deletedAt: r.deletedAt ?? null,
   }
@@ -228,6 +232,16 @@ export async function maxSortOrderAll(exec: Executor): Promise<number> {
   return Number((rows[0] as { m: unknown } | undefined)?.m ?? 0)
 }
 
+/** P8-0：标签组内当前最大 tag_sort_order（未删除行；组空或全 NULL → -1，调用方 +1 即组尾追加） */
+export async function maxTagSortOrderInGroup(exec: Executor, tagId: string): Promise<number> {
+  const db = asExecutor(exec)
+  const rows = await db
+    .select({ m: sql<unknown>`coalesce(max(${siteLinks.tagSortOrder}), -1)` })
+    .from(siteLinks)
+    .where(and(eq(siteLinks.tagId, BigInt(tagId)), isNull(siteLinks.deletedAt)))
+  return Number((rows[0] as { m: unknown } | undefined)?.m ?? -1)
+}
+
 // ── 写（仅事务内调用）───────────────────────────────────────────
 
 export interface NewLinkValues {
@@ -238,6 +252,8 @@ export interface NewLinkValues {
   categoryId: string
   tagId: string | null
   sortOrder: number
+  /** P8-0：标签组内稠密排名（tagId 为 null 时传 null） */
+  tagSortOrder: number | null
 }
 
 /** 新建（恒 draft、source_snapshot=false）；返回数据库生成的精确十进制 ID */
@@ -252,6 +268,7 @@ export async function insertLink(tx: AdminTx, v: NewLinkValues): Promise<string>
       categoryId: BigInt(v.categoryId),
       tagId: v.tagId === null ? null : BigInt(v.tagId),
       sortOrder: v.sortOrder,
+      tagSortOrder: v.tagSortOrder,
       status: "draft",
       sourceSnapshot: false,
       isGone: false,
@@ -268,6 +285,8 @@ export interface LinkPatch {
   /** null = 清除标签关联 */
   tagId?: string | null
   sortOrder?: number
+  /** P8-0：标签组内稠密排名（改标签时由 Service 按「新组 max+1 追加」规则重算；清除标签 → null） */
+  tagSortOrder?: number | null
   /** 状态切换专用（普通 PATCH 由 Service 控制字段，不带 status） */
   status?: "draft" | "published" | "disabled"
 }
@@ -285,6 +304,7 @@ export async function updateLinkWithVersion(tx: AdminTx, id: string, expectedVer
   if (patch.categoryId !== undefined) set.categoryId = BigInt(patch.categoryId)
   if (patch.tagId !== undefined) set.tagId = patch.tagId === null ? null : BigInt(patch.tagId)
   if (patch.sortOrder !== undefined) set.sortOrder = patch.sortOrder
+  if (patch.tagSortOrder !== undefined) set.tagSortOrder = patch.tagSortOrder
   if (patch.status !== undefined) set.status = patch.status
   const res = (await asExecutor(tx)
     .update(siteLinks)

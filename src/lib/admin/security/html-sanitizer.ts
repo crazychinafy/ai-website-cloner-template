@@ -12,14 +12,15 @@
 //   video/object/embed 等连同内容整体删除；未知标签剥壳留文本
 // - 属性 allowlist：无 on* 事件属性；style 仅 color/background-color/font-size
 //   且值须匹配安全正则（禁 url()/var()/表达式）；class/id 一律丢弃
-// - href/src：只允许 http(s) 绝对地址或站内根路径（/uploads/... 等），
-//   拒绝 javascript:/data:/file:/vbscript:/mailto、// 协议相对、反斜杠与 .. 穿越
+// - href/src：策略单一事实源在 validation/media-path.ts（问题 03）——站内只允许
+//   受控素材路径（前缀白名单+已知后缀），站外只允许 http(s)（显式开关控制）；
+//   拒绝 javascript:/data:/file:/vbscript:/mailto、// 协议相对、反斜杠、.. 穿越与查询串
 // - a[target=_blank] 强制 rel="noopener noreferrer"（防 reverse-tabnabbing）
 // - 图片不做任何远端抓取（SSRF 面收敛）；嵌套深度上限 32
 import "server-only"
 import { createHash } from "node:crypto"
 import sanitizeHtml from "sanitize-html"
-import { checkHttpUrl } from "../validation/link-schema.ts"
+import { ALLOW_EXTERNAL_MEDIA, checkHttpUrl, isControlledMediaPath, squeeze } from "../validation/media-path.ts"
 
 /** 富文本标签 allowlist（小写；编辑器产物 + 历史正文用到的标签） */
 const ALLOWED_TAGS = [
@@ -64,29 +65,20 @@ const NON_TEXT_TAGS = [
   "source", "track", "canvas", "xmp", "plaintext",
 ]
 
-/** 站内素材根路径前缀（与 asset()/public/ 目录布局一致；封面/头像/正文图片共用） */
-const MEDIA_ROOT_PREFIXES = ["/uploads/", "/sites/", "/images/", "/videos/", "/media/"]
-
-const CONTROL_RE = /[\u0000-\u001f\u007f]/g
-
-/** 去掉控制/空白字符后的形态（防 "java\nscript:" 之类拆分注入） */
-function squeeze(raw: string): string {
-  return raw.replace(CONTROL_RE, "").trim()
-}
+/** 站内素材策略与 checkHttpUrl 均在 validation/media-path.ts（问题 03：单一事实源） */
 
 /**
- * 图片 src 策略：站内根路径（限定素材前缀，拒 .. 穿越与反斜杠）或 http(s) 绝对地址。
- * 拒协议相对 //、data:/file: 等一切其他协议（sanitize-html 协议闸之外的第二道闸）。
+ * 图片 src 策略（委托 media-path.ts 统一策略）：站内必须是受控素材路径
+ * （根前缀白名单 + 已知图片/视频后缀 + 禁穿越/查询串），站外仅 http(s) 且受
+ * ALLOW_EXTERNAL_MEDIA 显式开关控制；拒协议相对 //、data: 等一切其他协议
+ * （sanitize-html 协议闸之外的第二道闸）。
  */
 export function isSafeMediaSrc(raw: string): boolean {
   const v = squeeze(raw)
   if (!v || v.includes("\\")) return false
   if (v.startsWith("//")) return false
-  if (v.startsWith("/")) {
-    if (v.includes("..")) return false
-    return MEDIA_ROOT_PREFIXES.some((p) => v.startsWith(p))
-  }
-  return checkHttpUrl(v) === null
+  if (v.startsWith("/")) return isControlledMediaPath(v)
+  return ALLOW_EXTERNAL_MEDIA && checkHttpUrl(v) === null
 }
 
 /**

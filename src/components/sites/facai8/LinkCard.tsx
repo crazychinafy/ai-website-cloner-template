@@ -1,15 +1,24 @@
 import Link from 'next/link'
-import type { LinkItem } from '@/lib/facai8/data/links'
-import { asset, firstChar, gstaticFavicon, tagById } from '@/lib/facai8/util'
+import type { LinkItemDto, TagDto } from '@/lib/facai8/content/types'
+import { asset, firstChar, gstaticFavicon } from '@/lib/facai8/util'
 
 // 站点卡片（.link-card）——源站共享 `l` 组件 1:1：
 //  logo 回退字 + (有 logo 时) 模糊底 + 图，悬停揭示；标题 + 描述；外部直达按钮(.link-goto)。
 //  isGone：卡片底 #fafafa + 红「已关站」角标(Kn) + 详情链接 opacity .7 + 标题删除线灰 + 直达按钮禁用。
 //  rating-badge：右上角标签图标圆徽（非失效 且 有标签 且 标签存在时）；tag 页源站此卡片不渲染该徽 → showRatingBadge=false。
 //  注：本地 logo/favicon 均为已解析路径，源站 `j()/re()` 的「库id:字形」冒号语法解析在此不需要（归档即解析后类名）。
-export function LinkCard({ l, showRatingBadge = true }: { l: LinkItem; showRatingBadge?: boolean }) {
+//  P8-4：标签徽标数据由服务端注入（tagsById = repo.getTags() 派生映射），组件不再读静态档案。
+export function LinkCard({
+  l,
+  showRatingBadge = true,
+  tagsById,
+}: {
+  l: LinkItemDto
+  showRatingBadge?: boolean
+  tagsById?: Record<string, TagDto>
+}) {
   const gone = l.isGone === 1
-  const tag = tagById(l.tagId)
+  const tag = l.tagId ? (tagsById?.[l.tagId] ?? null) : null
   const logo = l.logoUrl ? asset(l.logoUrl) : null
 
   return (

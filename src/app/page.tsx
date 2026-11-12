@@ -1,32 +1,49 @@
 import { getSessionUser } from '@/lib/facai8/auth'
-import { SITE_INFO } from '@/lib/facai8/data/site-info'
-import { ALL_LINKS, type LinkItem } from '@/lib/facai8/data/links'
-import { LINK_CATEGORIES } from '@/lib/facai8/data/categories'
+import { getContentRepository } from '@/lib/facai8/content/source'
 import { HomeShell } from '@/components/sites/facai8/HomeShell'
 import { HomePopup } from '@/components/sites/facai8/HomePopup'
 import { SiteFrame } from '@/components/sites/facai8/SiteFrame'
 
-function groupLinks(): Record<string, LinkItem[]> {
-  const m: Record<string, LinkItem[]> = {}
-  for (const l of ALL_LINKS) {
-    const arr = m[l.categoryId]
-    if (arr) arr.push(l)
-    else m[l.categoryId] = [l]
-  }
-  return m
-}
+// P8-3：首页全部数据改走统一内容仓库（CONTENT_SOURCE=static|mysql 双源同构）。
+// 首页分组语义 = getLinksGroupedForHome()：组内档案原始序（与旧 page.tsx groupLinks() 逐位一致）。
 
-export const metadata = {
-  title: '彩搜搜',
-  description: SITE_INFO.siteDescription,
+export async function generateMetadata() {
+  const settings = await getContentRepository().getSiteSettings()
+  return {
+    title: '彩搜搜',
+    description: settings.siteDescription,
+  }
 }
 
 export default async function HomePage() {
-  const user = await getSessionUser()
+  const repo = getContentRepository()
+  const [user, cats, linksByCategory, bulletins, ads, settings, newLinks, newArticles, tags] =
+    await Promise.all([
+      getSessionUser(),
+      repo.getHomeCategories(),
+      repo.getLinksGroupedForHome(),
+      repo.getBulletins(),
+      repo.getAds(),
+      repo.getSiteSettings(),
+      repo.getNewLinks(),
+      repo.getNewArticles(),
+      repo.getTags(),
+    ])
+  const tagsById = Object.fromEntries(tags.map((t) => [t.id, t]))
   return (
     <SiteFrame user={user}>
-      <HomeShell cats={LINK_CATEGORIES} linksByCategory={groupLinks()} />
-      <HomePopup />
+      <HomeShell
+        cats={cats}
+        linksByCategory={linksByCategory}
+        bulletins={bulletins}
+        ads={ads}
+        stats={settings.stats}
+        newLinks={newLinks}
+        newArticles={newArticles}
+        recentLinks={settings.recentLinks}
+        tagsById={tagsById}
+      />
+      <HomePopup popup={settings.popup} />
     </SiteFrame>
   )
 }

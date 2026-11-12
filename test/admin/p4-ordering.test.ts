@@ -127,10 +127,10 @@ describe("P4 排序（CAT_ORDER ↔ MySQL sort_order）", () => {
     expect((await mysqlRepo.getRecentLinks()).map((l) => l.id)).toEqual((await staticRepo.getRecentLinks()).map((l) => l.id))
   })
 
-  it("标签页网格序：集合一致（顺序差异为 P2 单 sort_order 列的已知限制，如实断言集合）", async () => {
+  it("标签页网格序：P8-0 起逐位严格一致（site_links.tag_sort_order = TAG_ORDER 序列 + 档案序追加）", async () => {
     for (const t of TAGS) {
-      const s = (await staticRepo.getLinksByTag(t.id)).map((l) => l.id).sort()
-      const m = (await mysqlRepo.getLinksByTag(t.id)).map((l) => l.id).sort()
+      const s = (await staticRepo.getLinksByTag(t.id)).map((l) => l.id)
+      const m = (await mysqlRepo.getLinksByTag(t.id)).map((l) => l.id)
       expect(m, `tag ${t.name}`).toEqual(s)
     }
   })

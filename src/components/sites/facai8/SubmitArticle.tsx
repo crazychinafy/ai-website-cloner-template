@@ -3,14 +3,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from './Toast'
 import { Truncate } from './Truncate'
-import { ARTICLE_CATEGORIES } from '@/lib/facai8/data/article-categories'
-import { LINK_CATEGORIES, type CatNode } from '@/lib/facai8/data/categories'
 import { n as WEditor, t as WToolbar, type WangeditorEditor } from '@/vendor/wangeditor/wangeditor'
 import '@/vendor/wangeditor/wangeditor.css'
 
 // 源站 /submit-article（懒加载 SubmitArticle chunk 1:1 复刻）：
 // 双标签（提交文章/提交网址）+ wangeditor 富文本 + 分类组合框 + 校验/toast；
-// 本地适配：认证态来自会话（源站 localStorage token）、分类用本地档案、
+// 本地适配：认证态来自会话（源站 localStorage token）、
+// P8-4：分类由页面层从 repo.getArticleCategories()/getHomeCategories() 注入（旧 data/ 值导入已废除）、
 // 图片上传/提交/编辑读取按静态决策 mock（源站动作不落地）。
 
 type TabKey = 'article' | 'link'
@@ -37,18 +36,13 @@ function textLen(html: string): number {
   return new DOMParser().parseFromString(html, 'text/html').body.textContent.length
 }
 
-interface FlatCat {
+export interface FlatCat {
   id: string
   name: string
 }
 
 // 源站 o()/e() 两个分类端点的本地档案等价（flatten 规则与源站一致：
-// 文章 = 仅叶子；网址 = 父级 + 子级）
-const ARTICLE_CATS: FlatCat[] = ARTICLE_CATEGORIES.map((c) => ({ id: c.id, name: c.name }))
-const LINK_CATS: FlatCat[] = LINK_CATEGORIES.flatMap((c: CatNode) => [
-  { id: c.id, name: c.name },
-  ...c.children.map((k) => ({ id: k.id, name: k.name })),
-])
+// 文章 = 仅叶子；网址 = 父级 + 子级）。P8-4：flatten 移至页面层，分类 DTO 随 props 注入。
 
 // ─── 富文本编辑器（源站 `ee` 1:1）──────────────────────────────
 function RichEditor({ value, onChange, maxLength }: { value: string; onChange: (v: string) => void; maxLength: number }) {
@@ -257,7 +251,15 @@ function CatSelect({
 }
 
 // ─── 投稿页主体（源站 `E` 1:1）─────────────────────────────────
-export function SubmitArticle({ loggedIn }: { loggedIn: boolean }) {
+export function SubmitArticle({
+  loggedIn,
+  articleCats,
+  linkCats,
+}: {
+  loggedIn: boolean
+  articleCats: FlatCat[]
+  linkCats: FlatCat[]
+}) {
   const router = useRouter()
   const sp = useSearchParams()
   const p: TabKey = sp.get('tab') === 'link' ? 'link' : 'article'
@@ -381,7 +383,7 @@ export function SubmitArticle({ loggedIn }: { loggedIn: boolean }) {
     }
   }
 
-  const cats = p === 'article' ? ARTICLE_CATS : LINK_CATS
+  const cats = p === 'article' ? articleCats : linkCats
 
   return (
     <div className="submit-page">

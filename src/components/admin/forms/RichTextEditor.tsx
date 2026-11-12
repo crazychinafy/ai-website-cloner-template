@@ -34,6 +34,7 @@ import {
   Unlink,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ALLOW_EXTERNAL_MEDIA, checkHttpUrl, isControlledMediaPath } from "@/lib/admin/validation/media-path.ts"
 
 // ── 本地 HTML 小工具（仅用于粘贴清洗与命令前后快照；非安全边界）──────
 const RICH_TAGS = new Set([
@@ -42,6 +43,7 @@ const RICH_TAGS = new Set([
 ])
 const TAG_RE = /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^<>]*)?)\/?>/g
 const ATTR_RE = /([a-zA-Z][a-zA-Z0-9-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g
+
 
 /** 粘贴 HTML 本地清洗：未知标签剥壳留文本；属性按标签白名单；href/src 粗校验。 */
 export function sanitizePastedHtml(raw: string): string {
@@ -70,11 +72,16 @@ function escapeAttr(v: string): string {
   return v.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
-/** 图片 src 编辑端粗校验（与服务端 isSafeMediaSrc 同口径的 UI 提示，服务端仍是最终闸） */
+/**
+ * 图片 src 编辑端粗校验：直接复用服务端策略源 validation/media-path.ts
+ * （问题 03——封面/正文图片/Logo 与服务端 Sanitizer 同一政策，UI 提前反馈；
+ * 服务端仍是最终闸）。
+ */
 export function looksLikeSafeMediaSrc(raw: string): boolean {
   const v = raw.trim()
-  if (/^https?:\/\/\S+$/i.test(v) && !v.includes("..") && !v.includes("\\")) return true
-  return /^\/(uploads|sites|images|videos|media)\/[^\s\\]*$/.test(v) && !v.includes("..")
+  if (!v || v.includes("\\") || v.startsWith("//")) return false
+  if (v.startsWith("/")) return isControlledMediaPath(v)
+  return ALLOW_EXTERNAL_MEDIA && checkHttpUrl(v) === null
 }
 
 /** 链接 href 编辑端粗校验 */
@@ -90,7 +97,12 @@ export function looksLikeSafeHref(raw: string): boolean {
 // ── 编辑器 ──────────────────────────────────────────────────────
 interface Props {
   id: string
-  /** 初始 HTML（挂载时灌入一次；之后由编辑器接管） */
+  /**
+   * 初始 HTML（挂载时灌入一次；之后由编辑器接管）。
+   * 安全契约（问题 01）：调用方必须传服务端 Sanitizer 产物（详情接口的
+   * editorHtml 字段），绝不传库内原始 contentHtml——历史正文可能含未经清洗的
+   * 标签/事件属性，直接写入 contentEditable 会造成管理员端 DOM XSS。
+   */
   initialHtml: string
   onChange: (html: string) => void
   disabled?: boolean
@@ -135,7 +147,8 @@ export function RichTextEditor({ id, initialHtml, onChange, disabled = false, er
     [onChange, syncHistoryFlags],
   )
 
-  // 挂载：灌入初始 HTML（此后 initialHtml 变化不再覆盖，避免保存后回写打断光标）
+  // 挂载：灌入初始 HTML（此后 initialHtml 变化不再覆盖，避免保存后回写打断光标）。
+  // innerHTML 的唯一写入点——initialHtml 必须是服务端 editorHtml（见 Props 注释）
   React.useEffect(() => {
     if (mountedRef.current || !ref.current) return
     mountedRef.current = true

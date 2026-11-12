@@ -12,6 +12,7 @@ import { articles } from "@/lib/db/schema"
 import type { SQL } from "drizzle-orm"
 import { asExecutor, lastInsertIdString, type AdminTx, type Executor } from "./executor.ts"
 import { likeEscape } from "../validation/list-query.ts"
+import { sanitizeRichHtml } from "../security/html-sanitizer.ts"
 import type { ArticleListQuery } from "../validation/article-schema.ts"
 import type { ArticleDto } from "../dto/article.ts"
 
@@ -24,6 +25,9 @@ export function toArticleDto(row: ArticleRow): ArticleDto {
     categoryName: row.categoryNameSnapshot,
     title: row.title,
     contentHtml: row.contentHtml,
+    // 整改问题 01：编辑器安全正文——读路径内存净化副本（sanitize-html 幂等，
+    // 已清洗正文原样返回）；库内历史正文不批量重写、contentHtml 保持原始返回
+    editorHtml: sanitizeRichHtml(row.contentHtml),
     coverImage: row.coverImage,
     seoTitle: row.seoTitle,
     seoKeywords: row.seoKeywords,

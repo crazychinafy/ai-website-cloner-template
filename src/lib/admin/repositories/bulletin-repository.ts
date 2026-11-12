@@ -9,6 +9,7 @@ import { bulletins } from "@/lib/db/schema"
 import type { SQL } from "drizzle-orm"
 import { asExecutor, lastInsertIdString, type AdminTx, type Executor } from "./executor.ts"
 import { likeEscape } from "../validation/list-query.ts"
+import { sanitizeRichHtml } from "../security/html-sanitizer.ts"
 import type { BulletinListQuery } from "../validation/bulletin-schema.ts"
 import type { BulletinDto } from "../dto/bulletin.ts"
 
@@ -19,6 +20,8 @@ export function toBulletinDto(row: BulletinRow): BulletinDto {
     id: row.id.toString(),
     title: row.title,
     contentHtml: row.contentHtml,
+    // 整改问题 01：编辑器安全正文（读路径内存净化副本，库内不改；见文章 repo）
+    editorHtml: sanitizeRichHtml(row.contentHtml),
     status: row.status,
     sortOrder: row.sortOrder,
     publishedAt: row.publishedAt ?? null,

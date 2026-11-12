@@ -1,13 +1,13 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ALL_LINES, type LineItem } from '@/lib/facai8/data/lines'
+import type { LineDto } from '@/lib/facai8/content/types'
 import { displayUrl } from '@/lib/facai8/util'
 import { Truncate } from './Truncate'
 
 // 源站 /lines（懒加载 chunk LineCheck-gxh70Vm-.js，已存档 src-linecheck.js）本地等价：
 // 5 线路卡 + Image favicon 测速（10s 超时）+ 延迟着色（<300 绿 / <1000 琥珀 / ≥1000 红 / 失败灰）
 // + bar 宽 min(ms/15,100)% + 最快「推荐」 + 当前线路徽章（origin 匹配）+ 星空 canvas。
-// 线路列表为静态数据（源站 GET /api/public/lines 快照）→ 无加载骨架/错误重试分支。
+// P8-3（第 4 组）：线路列表由页面层从 repo.getLines() 注入（旧 ALL_LINES 值导入已废除）→ 无加载骨架/错误重试分支。
 
 const PROBE_TIMEOUT = 10_000
 const COPY_RESET = 1500
@@ -121,11 +121,11 @@ function useStars(canvasRef: React.RefObject<HTMLCanvasElement | null>, active: 
   }, [active, canvasRef])
 }
 
-export function Lines() {
+export function Lines({ lines }: { lines: LineDto[] }) {
   // 源站挂载即置 testing 再探测；本地初始 state 直接 = 全 testing（避免 effect 内同步 setState）
   const [results, setResults] = useState<Results>(() => {
     const n: Results = {}
-    for (const l of ALL_LINES) n[l.id] = 'testing'
+    for (const l of lines) n[l.id] = 'testing'
     return n
   })
   const [copied, setCopied] = useState<string | null>(null)
@@ -136,19 +136,20 @@ export function Lines() {
   useStars(canvasRef, true)
 
   // 源站 W()：逐条并发探测（Image favicon，10s 超时）
+  // P8-3：lines 为页面注入的只读数组（同一页面 payload 引用稳定）→ 入依赖，数据变化时重新探测
   const probeAll = useCallback(() => {
-    for (const l of ALL_LINES) {
+    for (const l of lines) {
       probe(l.url).then((r) => setResults((prev) => ({ ...prev, [l.id]: r })))
     }
-  }, [])
+  }, [lines])
 
   // 重新检测按钮：复位 testing + 重测
   const retest = useCallback(() => {
     const next: Results = {}
-    for (const l of ALL_LINES) next[l.id] = 'testing'
+    for (const l of lines) next[l.id] = 'testing'
     setResults(next)
     probeAll()
-  }, [probeAll])
+  }, [lines, probeAll])
 
   useEffect(() => {
     probeAll()
@@ -158,7 +159,7 @@ export function Lines() {
   }, [probeAll])
 
   // 源站：复制 = clipboard（回退 textarea/execCommand）+ 1.5s copied 态
-  const copy = async (ev: React.MouseEvent, l: LineItem) => {
+  const copy = async (ev: React.MouseEvent, l: LineDto) => {
     ev.stopPropagation()
     try {
       await navigator.clipboard.writeText(l.url)
@@ -184,7 +185,7 @@ export function Lines() {
   const best = (() => {
     let id: string | null = null
     let min = Infinity
-    for (const l of ALL_LINES) {
+    for (const l of lines) {
       const r = results[l.id]
       if (r && r !== 'testing' && r.ok && r.ms !== null && r.ms < min) {
         id = l.id
@@ -204,11 +205,11 @@ export function Lines() {
           <h1 className="lc-title">线路检测</h1>
           <p className="lc-sub">如当前访问缓慢或无法打开，可切换到以下备用线路</p>
         </div>
-        {ALL_LINES.length === 0 ? (
+        {lines.length === 0 ? (
           <div style={{ textAlign: 'center', color: '#8a919f', padding: '40px 0' }}>暂无可用线路</div>
         ) : (
           <div className="lc-grid">
-            {ALL_LINES.map((l, i) => {
+            {lines.map((l, i) => {
               const r = results[l.id]
               const isCurrent = origin !== '' && origin === l.url
               const isDead = r !== undefined && r !== 'testing' && !r.ok

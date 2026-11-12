@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createHash } from "node:crypto"
 import type { BulletinDto, PageResult } from "../../src/lib/admin/dto/bulletin.ts"
+import { sanitizeRichHtml } from "../../src/lib/admin/security/html-sanitizer.ts"
 import {
   auditJson,
   auditRows,
@@ -636,5 +637,36 @@ describe("P6C 公告：RBAC（4 角色 × 端点矩阵）", () => {
   it("无会话访问读写端点均 401", async () => {
     expect((await listRoute.GET(reqFor(su, "GET", BASE, undefined, { noAuth: true }))).status).toBe(401)
     expect((await itemRoute.PATCH(reqFor(su, "PATCH", `${BASE}/1`, { title: "x", version: 1 }, { noAuth: true }), ctxOf("1"))).status).toBe(401)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────
+
+describe("P6C 整改问题 01：editorHtml（编辑器安全正文）", () => {
+  const LEGACY = '<p onclick="alert(1)">历史</p><img src="x" onerror="alert(2)">'
+  const CLEAN = "<p>历史</p>"
+
+  it("GET 详情：contentHtml 原样、editorHtml 为净化副本、读路径不改库", async () => {
+    const id = await seedBulletinRaw(env.db, { title: "p6cB_整改01脏正文", contentHtml: LEGACY })
+    const d = (await getBulletin(id)).data!
+    expect(d.contentHtml).toBe(LEGACY)
+    expect(d.editorHtml).toBe(CLEAN)
+    expect(d.editorHtml).toBe(sanitizeRichHtml(d.contentHtml))
+    expect(String((await dbRow(id)).content_html)).toBe(LEGACY)
+  })
+
+  it("编辑器回传 editorHtml 保存：入库收敛；列表项同样携带 editorHtml", async () => {
+    const id = await seedBulletinRaw(env.db, { title: "p6cB_整改01回存", contentHtml: LEGACY })
+    const d = (await getBulletin(id)).data!
+    const saved = await patchBulletin(id, { version: d.version, contentHtml: d.editorHtml })
+    expect(saved.res.status).toBe(200)
+    expect(saved.json.data!.editorHtml).toBe(CLEAN)
+    expect(String((await dbRow(id)).content_html)).toBe(CLEAN)
+    const list = await body<PageResult<BulletinDto>>(
+      await listRoute.GET(reqFor(su, "GET", `${BASE}?q=${encodeURIComponent("p6cB_整改01回存")}`)),
+    )
+    const item = list.data!.items.find((x) => x.id === id)!
+    expect(item.editorHtml).toBe(CLEAN)
+    expect(item.editorHtml).toBe(sanitizeRichHtml(item.contentHtml))
   })
 })

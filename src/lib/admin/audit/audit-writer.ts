@@ -1,12 +1,14 @@
-// P6A：统一审计写入（复用 P2 admin_audit_logs 表；P7 前不做审计管理页面）
+// P6A：统一审计写入（复用 P2 admin_audit_logs 表；P7 起：写入时脱敏 + 审计管理页面）
 // ─────────────────────────────────────────────────────────────────
 // - 必须在业务事务内调用（与业务写入同一 tx）→ 审计失败时业务写入一并回滚
 // - before/after 只记录实际变化字段；不记录密码/Session/Cookie/CSRF Token
+// - P7：before/after 一律经统一脱敏器（redactor.ts）后才允许落库（写入时机；读取时机再兜一层）
 // - requestId / IP / User-Agent 来自当次请求上下文
 import "server-only"
 import { adminAuditLogs } from "@/lib/db/schema"
 import { ipLiteral, resolveClientIp } from "@/lib/admin/auth/session.ts"
 import type { AdminTx } from "@/lib/admin/repositories/executor.ts"
+import { redactAuditValue } from "./redactor.ts"
 
 /** 写操作请求上下文（Route Handler 组装后传入 Service） */
 export interface WriteCtx {
@@ -35,8 +37,8 @@ export async function writeAudit(tx: AdminTx, ctx: WriteCtx, entry: AuditEntry):
     action: entry.action.slice(0, 100),
     resourceType: entry.resourceType.slice(0, 100),
     resourceId: entry.resourceId.slice(0, 100),
-    beforeJson: entry.before ?? null,
-    afterJson: entry.after ?? null,
+    beforeJson: entry.before != null ? (redactAuditValue(entry.before) as object | null) : null,
+    afterJson: entry.after != null ? (redactAuditValue(entry.after) as object | null) : null,
     requestId: ctx.requestId.slice(0, 64),
     ipAddress: ipLiteral(resolveClientIp(ctx.req)),
     userAgent: ua || null,

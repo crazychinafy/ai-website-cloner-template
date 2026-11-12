@@ -1,0 +1,1 @@
+ALTER TABLE `site_links` ADD `archive_sort_order` int;

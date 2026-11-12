@@ -8,6 +8,7 @@ import mysql from "mysql2/promise"
 import type { Pool } from "mysql2/promise"
 import { drizzle } from "drizzle-orm/mysql2"
 import { migrate } from "drizzle-orm/mysql2/migrator"
+import { binaryColumnCast } from "../../src/lib/db/mysql-cast.ts"
 
 export const SCRATCH_DB = "facai8_p2_test"
 
@@ -37,6 +38,8 @@ const poolBase = {
   supportBigNumbers: true,
   timezone: "Z" as const,
   connectTimeout: 10_000,
+  // 与 src/lib/db/client.ts 池配置保持一致：VARBINARY 列按原始字节回读
+  typeCast: binaryColumnCast,
 }
 
 export function openPool(database?: string, override?: Partial<DbCreds>): Pool {

@@ -7,8 +7,8 @@
 //   - 计数（click/like/view）：字符串等值
 //   - null 与 "" 严格区分（不做相等放宽）
 //   - 图片路径：原始源站路径 1:1 等值（两侧都不做 asset() 映射 —— 映射是消费侧职责）
-//   - 排序：逐序列比对；标签页网格序为已知限制（P2 单 sort_order 列无法同时编码分类序与标签序）
-//     → 集合与字段必须一致，顺序差异如实报告（knownLimitation，不算失败）
+//   - 排序：逐序列比对；标签页网格序 P8-0 起同样严格一致（site_links.tag_sort_order，migration 0006 + 回填）；
+//     逐链接 1:1 查询（详情）/逐链接集合（备用链接链内序另测）无全局顺序语义 → 如实报告（knownLimitation，不算失败）
 // 输出：JSON + Markdown 报告；仅当全部一致（除已知限制）时 exit 0。
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -21,6 +21,8 @@ import { siteLinkDetails } from "../../src/lib/db/schema/index.ts"
 import { StaticSnapshotRepository } from "../../src/lib/facai8/content/static-repository.ts"
 import { MySqlRepository } from "../../src/lib/facai8/content/mysql-repository.ts"
 import type { ContentRepository } from "../../src/lib/facai8/content/repository.ts"
+// P7：deepEqual/diffPositions 抽取至共享比对模块（后台导入差异预览共用同一实现）
+import { deepEqual, diffPositions } from "../../src/lib/admin/import/import-compare.ts"
 
 const envSchema = z.object({
   DB_HOST: z.string().min(1).default("127.0.0.1"),
@@ -69,32 +71,6 @@ interface VerifyReport {
 
 function idOf(r: AnyRecord, key: string): string {
   return String(r[key] ?? "")
-}
-
-/** 序列比对（ID 序列）；返回差异位置数 */
-function diffPositions(a: string[], b: string[]): number {
-  const n = Math.max(a.length, b.length)
-  let d = 0
-  for (let i = 0; i < n; i++) if ((a[i] ?? "∅") !== (b[i] ?? "∅")) d++
-  return d
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true
-  if (typeof a !== typeof b) return false
-  if (a === null || b === null) return false
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false
-    return a.every((x, i) => deepEqual(x, b[i]))
-  }
-  if (typeof a === "object") {
-    if (typeof b !== "object" || Array.isArray(b)) return false
-    const ka = Object.keys(a as AnyRecord)
-    const kb = Object.keys(b as AnyRecord)
-    if (ka.length !== kb.length) return false
-    return ka.every((k) => (a as AnyRecord)[k] === (b as AnyRecord)[k] || deepEqual((a as AnyRecord)[k], (b as AnyRecord)[k]))
-  }
-  return false
 }
 
 function compareList(
@@ -174,7 +150,7 @@ async function main(): Promise<void> {
       "计数：字符串等值",
       "null 与空字符串严格区分（不做放宽）",
       "图片路径：原始源站路径 1:1 等值（asset() 映射是消费侧职责，两侧 DTO 均不含映射）",
-      "标签页网格序：P2 单 sort_order 列无法同时编码分类序与标签序 → 顺序差异为已知限制（集合+字段必须零差异）",
+      "标签页网格序：P8-0 起严格一致（site_links.tag_sort_order，migration 0006 + 回填；集合+顺序均须零差异）",
     ],
     types: [],
     tagOrdering: [],
@@ -452,7 +428,7 @@ async function main(): Promise<void> {
     report.types.push(c)
   }
 
-  // ── 标签页网格序（已知限制：集合+字段零差异要求，顺序差异如实报告） ──
+  // ── 标签页网格序（P8-0 起严格一致：tag_sort_order 复现 TAG_ORDER + 档案序追加；集合与顺序都必须零差异） ──
   {
     const sTags = await staticRepo.getTags()
     for (const t of sTags) {
@@ -469,10 +445,12 @@ async function main(): Promise<void> {
         sequenceSame: pos === 0,
         diffPositions: pos,
       })
-      if (!setSame) {
-        // 集合不一致 = 真失败（记入 site_links 关联）
+      if (!setSame || pos !== 0) {
+        // 集合或顺序不一致 = 真失败（记入 site_links 关联）
         const linksType = report.types.find((x) => x.type === "site_links")
-        linksType?.relations.push(`标签 ${t.id} 链接集合不一致 static=${sIds.length} mysql=${mIds.length}`)
+        linksType?.relations.push(
+          `标签 ${t.id} 网格序不一致 static=${sIds.length} mysql=${mIds.length} 差异位置=${pos}（集合一致=${setSame}）`,
+        )
         if (linksType) linksType.ok = false
       }
     }
@@ -524,11 +502,12 @@ async function main(): Promise<void> {
     if (t.fieldDiffs.length > 0 && t.fieldDiffs.length <= 8)
       for (const f of t.fieldDiffs) console.log(`         字段: ${f.id}.${f.field} static=${JSON.stringify(f.static)} mysql=${JSON.stringify(f.mysql)}`)
   }
-  console.log(`\n标签页网格序（已知限制：P2 单 sort_order 列）:`)
-  for (const t of report.tagOrdering) console.log(`  ${t.tagId} static=${t.tagStatic} mysql=${t.mysql} 顺序一致=${t.sequenceSame ? "是" : `否（差异位置 ${t.diffPositions}，集合一致）`}`)
+  console.log(`\n标签页网格序（P8-0 严格：集合 + 顺序）:`)
+  for (const t of report.tagOrdering)
+    console.log(`  ${t.tagId} static=${t.tagStatic} mysql=${t.mysql} 顺序一致=${t.sequenceSame ? "是" : "否"}${t.sequenceSame ? "" : `（差异位置 ${t.diffPositions}）`}`)
   console.log(`\n派生数据:`)
   for (const d of report.derived) console.log(`  [${d.ok ? "OK" : "FAIL"}] ${d.name} static=${d.staticCount} mysql=${d.mysqlCount} 字段差异=${d.fieldDiffs.length}`)
-  console.log(`\n结论: ${report.allOk ? "全部一致 ✓（含已知标签序限制，集合+字段零差异）" : "存在差异 ✗（详见报告）"}`)
+  console.log(`\n结论: ${report.allOk ? "全部一致 ✓（含标签页网格序严格一致）" : "存在差异 ✗（详见报告）"}`)
 
   if (jsonPath) {
     const { writeFileSync } = await import("node:fs")

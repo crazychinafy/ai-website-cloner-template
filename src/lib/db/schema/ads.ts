@@ -5,7 +5,7 @@ import { bigint, datetime, index, int, mysqlEnum, mysqlTable, varchar } from "dr
 export const ads = mysqlTable(
   "ads",
   {
-    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey(),
+    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().autoincrement().primaryKey(),
     position: varchar("position", { length: 64 }).notNull().default("home"),
     title: varchar("title", { length: 255 }).notNull(),
     targetUrl: varchar("target_url", { length: 2048 }).notNull(),

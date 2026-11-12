@@ -158,6 +158,13 @@ CREATE TABLE site_links (
   is_gone BOOLEAN NOT NULL DEFAULT FALSE,
   status ENUM('draft','published','disabled') NOT NULL DEFAULT 'published',
   sort_order INT NOT NULL DEFAULT 0,
+  -- P8-0：标签页网格规范序 —— 所属标签组内稠密排名（0..n-1，= TAG_ORDER 序列 + 档案序追加）；
+  -- 无标签或未经导入/回填/后台维护可为 NULL（标签页按 id 附尾）。向后兼容：可空列，migration 0006。
+  tag_sort_order INT NULL,
+  -- P8：首页分组 + 搜索候选规范序 = 源档案（ALL_LINKS 快照插入序）全局稠密下标（0..n-1）。
+  -- 组内档案序 ≠ 分类规范序 (sort_order,id)（90 分类中 45 个实测不同），必须由本列显式复现；
+  -- 导入插入期按快照数组下标写入（checksum 形态不变），后台新建行 NULL → 前台按 id 附尾。migration 0007。
+  archive_sort_order INT NULL,
   source_snapshot BOOLEAN NOT NULL DEFAULT TRUE,
   version INT UNSIGNED NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -165,6 +172,7 @@ CREATE TABLE site_links (
   deleted_at DATETIME(3) NULL,
   KEY idx_site_links_category_status_sort (category_id, status, deleted_at, sort_order),
   KEY idx_site_links_tag_status (tag_id, status, deleted_at),
+  KEY idx_site_links_tag_sort (tag_id, status, deleted_at, tag_sort_order, id),
   KEY idx_site_links_updated (updated_at),
   CONSTRAINT fk_site_links_category FOREIGN KEY (category_id) REFERENCES link_categories(id) ON DELETE RESTRICT,
   CONSTRAINT fk_site_links_tag FOREIGN KEY (tag_id) REFERENCES site_tags(id) ON DELETE RESTRICT
@@ -236,7 +244,8 @@ CREATE TABLE bulletins (
 ) ENGINE=InnoDB;
 
 CREATE TABLE ads (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6D migration 0005：id 已转 AUTO_INCREMENT（历史雪花 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   position VARCHAR(64) NOT NULL DEFAULT 'home',
   title VARCHAR(255) NOT NULL,
   target_url VARCHAR(2048) NOT NULL,
@@ -254,7 +263,8 @@ CREATE TABLE ads (
 ) ENGINE=InnoDB;
 
 CREATE TABLE site_lines (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6D migration 0005：id 已转 AUTO_INCREMENT（历史雪花 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   url VARCHAR(2048) NOT NULL,
   status ENUM('active','disabled') NOT NULL DEFAULT 'active',
@@ -293,6 +303,8 @@ CREATE TABLE site_pages (
 CREATE TABLE site_settings (
   setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
   setting_value JSON NOT NULL,
+  -- P6D migration 0005：新增 version 列（逐 key 乐观锁）
+  version INT UNSIGNED NOT NULL DEFAULT 1,
   updated_by BIGINT UNSIGNED NULL,
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_site_settings_updated_by FOREIGN KEY (updated_by) REFERENCES admin_users(id) ON DELETE SET NULL

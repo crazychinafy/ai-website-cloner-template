@@ -5,7 +5,7 @@ import { bigint, datetime, index, int, mysqlEnum, mysqlTable, varchar } from "dr
 export const siteLines = mysqlTable(
   "site_lines",
   {
-    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().primaryKey(),
+    id: bigint("id", { mode: "bigint", unsigned: true }).notNull().autoincrement().primaryKey(),
     name: varchar("name", { length: 255 }).notNull(),
     url: varchar("url", { length: 2048 }).notNull(),
     status: mysqlEnum("status", ["active", "disabled"]).notNull().default("active"),

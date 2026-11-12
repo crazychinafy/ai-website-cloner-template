@@ -1,11 +1,14 @@
 'use client'
-import { useMemo, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { asset, gstaticFavicon, searchArticles, searchLinks, type SearchArticleResult, type SearchLinkResult } from '@/lib/facai8/util'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { asset, gstaticFavicon } from '@/lib/facai8/util'
+import type { SearchArticleDto, SearchLinkDto, SearchResults } from '@/lib/facai8/content/types'
 import { Truncate, hlNodes } from './Truncate'
 
 // 源站 /search（懒加载 chunk Search）本地等价：独立居中面板、10 字符上限、网址/文章双标签、
-// 15 条/页分页、hl 高亮、截断 tooltip。数据静态 → 同步搜索（无加载骨架/错误态）。
+// 15 条/页分页、hl 高亮、截断 tooltip。
+// P8-4：搜索由页面层 repo.searchLinks/searchArticles 服务端执行后经 props 注入（旧 util 值导入已废除）；
+// 标签切换在两份已取结果间切换、分页本地切片，均无需取数 → 仍无加载骨架/错误态。
 
 const PAGE_SIZE = 15
 const TABS = [
@@ -14,10 +17,10 @@ const TABS = [
 ] as const
 type TabKey = (typeof TABS)[number]['key']
 
-type Row = { type: 'link' } & SearchLinkResult | { type: 'article' } & SearchArticleResult
+type Row = { type: 'link' } & SearchLinkDto | { type: 'article' } & SearchArticleDto
 
 /** 链接图标：有 logo 用本地素材，无 logo 用源站同款 gstatic favicon */
-function logoSrc(r: SearchLinkResult): string {
+function logoSrc(r: SearchLinkDto): string {
   if (r.logoUrl) {
     if (r.logoUrl.startsWith('http')) return r.logoUrl
     return asset(r.logoUrl) || ''
@@ -25,28 +28,34 @@ function logoSrc(r: SearchLinkResult): string {
   return gstaticFavicon(r.url)
 }
 
-export function Search() {
+export function Search({
+  q,
+  initialTab,
+  initialPage,
+  linkResults,
+  articleResults,
+}: {
+  q: string
+  initialTab: TabKey
+  initialPage: number
+  linkResults: SearchResults<SearchLinkDto>
+  articleResults: SearchResults<SearchArticleDto>
+}) {
   const router = useRouter()
-  const sp = useSearchParams()
-  const q = sp.get('q') || ''
-  const urlTab: TabKey = sp.get('t') === 'article' ? 'article' : 'link'
-  const urlPage = Math.max(0, (parseInt(sp.get('p') || '', 10) || 1) - 1)
 
   const [input, setInput] = useState(q)
-  const [tab, setTab] = useState<TabKey>(urlTab)
-  const [page, setPage] = useState(urlPage)
+  const [tab, setTab] = useState<TabKey>(initialTab)
+  const [page, setPage] = useState(initialPage)
 
-  const { list, total } = useMemo<{ list: Row[]; total: number }>(() => {
-    if (!q.trim()) return { list: [], total: 0 }
-    if (tab === 'link') {
-      const r = searchLinks(q)
-      return { list: r.map((x) => ({ ...x, type: 'link' as const })), total: r.length }
-    }
-    const r = searchArticles(q)
-    return { list: r.map((x) => ({ ...x, type: 'article' as const })), total: r.length }
-  }, [q, tab])
+  // 服务端已截断（SEARCH_LINK_LIMIT/SEARCH_ARTICLE_LIMIT）：分页以已取 items 为准，
+  // 「共 N 条」展示 total（未截断命中总数，与旧客户端全量搜索一致）。
+  const list: Row[] =
+    tab === 'link'
+      ? linkResults.items.map((x) => ({ ...x, type: 'link' as const }))
+      : articleResults.items.map((x) => ({ ...x, type: 'article' as const }))
+  const total = tab === 'link' ? linkResults.total : articleResults.total
 
-  const pages = Math.ceil(total / PAGE_SIZE)
+  const pages = Math.ceil(list.length / PAGE_SIZE)
   const rows = list.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
 
   // 提交（按钮 / Enter）：更新输入 + 页码归零 + replace 导航（源站同款）

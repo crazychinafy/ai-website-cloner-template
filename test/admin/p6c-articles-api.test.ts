@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createHash } from "node:crypto"
 import type { ArticleDto, PageResult } from "../../src/lib/admin/dto/article.ts"
 import { sanitizeRichHtml } from "../../src/lib/admin/security/html-sanitizer.ts"
+import { lockArticleCategoryBriefForUpdate } from "../../src/lib/admin/repositories/article-category-repository.ts"
 import {
   auditJson,
   auditRows,
@@ -898,5 +899,107 @@ describe("P6C 文章：幂等与旁路防护", () => {
     const seeded = await seedArticleRaw(env.db, { categoryId: CAT.catA.id, title: "p6c_自增基准" })
     const { json } = await createArticle("p6c_自增新建")
     expect(BigInt(json.data!.id) > BigInt(seeded)).toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────
+
+describe("P6C 整改问题 01：editorHtml（编辑器安全正文）", () => {
+  const LEGACY = '<p onclick="alert(1)">历史</p><img src="x" onerror="alert(2)"><script>bad()</script>'
+  const CLEAN = "<p>历史</p>"
+
+  it("GET 详情：contentHtml 原样返回，editorHtml 为净化副本；读路径不改库", async () => {
+    const id = await seedArticleRaw(env.db, { categoryId: CAT.catA.id, title: "p6c_整改01脏正文", contentHtml: LEGACY })
+    const d = (await getArticle(id)).data!
+    expect(d.contentHtml).toBe(LEGACY)
+    expect(d.editorHtml).toBe(CLEAN)
+    expect(d.editorHtml).not.toContain("onerror")
+    expect(d.editorHtml).toBe(sanitizeRichHtml(d.contentHtml))
+    expect(String((await dbRow(id)).content_html)).toBe(LEGACY)
+  })
+
+  it("编辑器回传 editorHtml 保存：入库收敛；列表项同样携带 editorHtml", async () => {
+    const id = await seedArticleRaw(env.db, { categoryId: CAT.catA.id, title: "p6c_整改01回存", contentHtml: LEGACY })
+    const d = (await getArticle(id)).data!
+    const saved = await patchArticle(id, { version: d.version, contentHtml: d.editorHtml })
+    expect(saved.res.status).toBe(200)
+    expect(saved.json.data!.editorHtml).toBe(CLEAN)
+    expect(String((await dbRow(id)).content_html)).toBe(CLEAN)
+    const list = await body<PageResult<ArticleDto>>(
+      await listRoute.GET(reqFor(su, "GET", `${BASE}?q=${encodeURIComponent("p6c_整改01回存")}`)),
+    )
+    const item = list.data!.items.find((x) => x.id === id)!
+    expect(item.editorHtml).toBe(CLEAN)
+    expect(item.editorHtml).toBe(sanitizeRichHtml(item.contentHtml))
+  })
+})
+
+describe("P6C 整改问题 02：分类检查进事务 + 分类行 FOR UPDATE 锁", () => {
+  it("持锁事务阻塞并发软删除：检查与写入之间分类状态不漂移", async () => {
+    const catRes = await catRoute.POST(reqFor(su, "POST", "/api/admin/v1/article-categories", { name: "p6c_整改02锁分类" }))
+    const catId = (await body<{ id: string }>(catRes)).data!.id
+    let releasedAt = 0
+    const holding = env.db.transaction(async (tx) => {
+      const brief = await lockArticleCategoryBriefForUpdate(tx, catId)
+      expect(brief?.status).toBe("active")
+      await new Promise((r) => setTimeout(r, 300))
+      releasedAt = Date.now()
+    })
+    await new Promise((r) => setTimeout(r, 80)) // 让持锁事务先启动
+    const deleting = rawQuery(env.pool, "UPDATE article_categories SET deleted_at = NOW(3) WHERE id = ?", [catId])
+    await new Promise((r) => setTimeout(r, 150))
+    // UPDATE 正排在行锁之后：尚未提交，deleted_at 仍为 NULL
+    const mid = await rawQuery<{ deleted_at: string | null }>(
+      env.pool,
+      "SELECT deleted_at FROM article_categories WHERE id = ?",
+      [catId],
+    )
+    expect(mid[0]!.deleted_at).toBeNull()
+    await deleting
+    expect(Date.now()).toBeGreaterThanOrEqual(releasedAt) // 软删除只可能在锁释放后落地
+    await holding
+    const after = await rawQuery<{ deleted_at: string | null }>(
+      env.pool,
+      "SELECT deleted_at FROM article_categories WHERE id = ?",
+      [catId],
+    )
+    expect(after[0]!.deleted_at).not.toBeNull()
+  })
+
+  it("软删分类后：发布仍 409（锁定读与原检查语义一致）", async () => {
+    const seeded = await seedArticleRaw(env.db, { categoryId: CAT.catA.id, title: "p6c_整改02发布", contentHtml: "<p>正文</p>" })
+    await rawQuery(env.pool, "UPDATE article_categories SET deleted_at = NOW(3) WHERE id = ?", [CAT.catA.id])
+    const gate = await patchStatus(seeded, "published", 1)
+    expect(gate.res.status).toBe(409)
+    expect(gate.json.error!.message).toContain("所属分类不存在")
+    await rawQuery(env.pool, "UPDATE article_categories SET deleted_at = NULL WHERE id = ?", [CAT.catA.id])
+  })
+})
+
+describe("P6C 整改问题 03：封面图受控素材路径闸", () => {
+  it("未知后缀 / 查询串 / 穿越 / 相对路径 → 422（POST 与 PATCH 同闸）", async () => {
+    for (const bad of ["/uploads/a.php", "/uploads/a.png?v=1", "/uploads/../../etc/x.png", "uploads/a.png", "/etc/x.png"]) {
+      const res = await listRoute.POST(
+        reqFor(su, "POST", BASE, { title: "p6c_整改03封面", categoryId: CAT.catA.id, coverImage: bad }),
+      )
+      const e = await errBody(res)
+      expect(res.status, bad).toBe(422)
+      expect(e.error.fields?.coverImage, bad).toBeTruthy()
+    }
+    const made = await createArticle("p6c_整改03改封面", { extra: { contentHtml: "<p>正文</p>" } })
+    const bad2 = await patchArticle(made.json.data!.id, { version: made.json.data!.version, coverImage: "/uploads/a.exe" })
+    expect(bad2.res.status).toBe(422)
+    expect(bad2.json.error!.fields?.coverImage).toBeTruthy()
+  })
+
+  it("历史形态站内路径与站外 https 均放行（站外是显式策略 ALLOW_EXTERNAL_MEDIA）", async () => {
+    const ok = await createArticle("p6c_整改03合法封面", {
+      extra: { coverImage: "/uploads/2026-11-07/667f226131c64b0fbb359e3b5d2d8c9f.png" },
+    })
+    expect(ok.res.status).toBe(200)
+    expect(ok.json.data!.coverImage).toBe("/uploads/2026-11-07/667f226131c64b0fbb359e3b5d2d8c9f.png")
+    const ext = await createArticle("p6c_整改03外链封面", { extra: { coverImage: "https://cdn.example.com/a.jpg" } })
+    expect(ext.res.status).toBe(200)
+    expect(ext.json.data!.coverImage).toBe("https://cdn.example.com/a.jpg")
   })
 })

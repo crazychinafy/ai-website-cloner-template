@@ -1,10 +1,12 @@
 import Link from 'next/link'
-import { BULLETINS, type Bulletin } from '@/lib/facai8/data/bulletins'
+import type { BulletinDto } from '@/lib/facai8/content/types'
 import { localHtml } from '@/lib/facai8/util'
 
 // 源站详情响应字段（x-bulletin-detail.json 存档）：prevId / nextId / listPage
+// P8-3（第 3 组）：侧栏公告列表由页面层从 repo.getBulletins() 注入（旧 BULLETINS 值导入已废除）
 interface Props {
-  bulletin: Bulletin
+  bulletin: BulletinDto
+  bulletins: BulletinDto[]
   total: number
   prevId: string | null
   nextId: string | null
@@ -29,7 +31,7 @@ function headDate(s: string): string {
 }
 
 // 公告详情（源站懒加载 chunk BulletinDetail 的本地等价；本地数据静态，无加载态）
-export function BulletinDetail({ bulletin, total, prevId, nextId }: Props) {
+export function BulletinDetail({ bulletin, bulletins, total, prevId, nextId }: Props) {
   const id = bulletin.id
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '30px 20px' }}>
@@ -94,7 +96,7 @@ export function BulletinDetail({ bulletin, total, prevId, nextId }: Props) {
               <span className="bulletin-side-count">共 {total} 条</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, opacity: 1, transition: 'opacity .15s' }}>
-              {BULLETINS.map((e) => {
+              {bulletins.map((e) => {
                 const active = String(e.id) === id
                 return (
                   <Link

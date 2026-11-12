@@ -47,7 +47,8 @@ const STATUS_ACTIONS: Record<BulletinStatus, { label: string; next: BulletinStat
 }
 
 function toForm(r: BulletinDto): FormState {
-  return { title: r.title, sortOrder: String(r.sortOrder), contentHtml: r.contentHtml }
+  // contentEditable 灌服务端净化出的 editorHtml（整改问题 01，见文章编辑器同点注释）
+  return { title: r.title, sortOrder: String(r.sortOrder), contentHtml: r.editorHtml }
 }
 
 function isValidSortOrder(v: string): boolean {
@@ -108,7 +109,8 @@ export function BulletinEditor({ mode, bulletinId, csrfToken, canPublish, canDel
   function appliedRecord(r: BulletinDto) {
     setRecord(r)
     setInitial(toForm(r))
-    setForm((f) => toForm({ ...r, contentHtml: f.contentHtml }))
+    // 保存成功后采纳服务端元信息，但保留编辑器当前内容（toForm 读 editorHtml——问题 01）
+    setForm((f) => toForm({ ...r, editorHtml: f.contentHtml }))
     setVersion(r.version)
     setStatus(r.status)
   }
@@ -160,8 +162,9 @@ export function BulletinEditor({ mode, bulletinId, csrfToken, canPublish, canDel
       setRecord((cur) => (cur ? { ...cur, ...res.data } : cur))
       if (res.data.contentHtml !== form.contentHtml) {
         // 发布闸门可能顺带收敛了未清洗正文——同步编辑器，避免下次保存回写旧值
-        setForm((f) => ({ ...f, contentHtml: res.data!.contentHtml }))
-        setInitial((i) => ({ ...i, contentHtml: res.data!.contentHtml }))
+        // （问题 01：编辑器状态始终用服务端净化出的 editorHtml）
+        setForm((f) => ({ ...f, contentHtml: res.data!.editorHtml }))
+        setInitial((i) => ({ ...i, contentHtml: res.data!.editorHtml }))
       }
       toast.success(`「${record.title}」已${label}`)
     } else {
@@ -298,7 +301,7 @@ export function BulletinEditor({ mode, bulletinId, csrfToken, canPublish, canDel
           >
             <RichTextEditor
               id="bulletin-content"
-              initialHtml={record ? record.contentHtml : ""}
+              initialHtml={record ? record.editorHtml : ""}
               onChange={(html) => setField("contentHtml", html)}
               disabled={submitting || deleted}
               ariaLabel="公告正文编辑器"

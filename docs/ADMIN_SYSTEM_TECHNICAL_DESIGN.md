@@ -277,7 +277,7 @@
 6. 回滚时只需将 CONTENT_SOURCE 改回 static 并重启服务；静态快照必须始终存在。
 7. 允许管理后台先独立运行和管理 MySQL，而前台仍保持 static 模式；这期间后台修改不会立即反映到前台，界面和文档必须明确提示当前数据源。
 
-### 5.2 读取层设计
+### 5.2 读取层设计（P8 已实施）
 
 先定义前台需要的稳定接口，例如：
 - getHomeCategories()
@@ -296,6 +296,8 @@
 由 source.ts 根据 CONTENT_SOURCE 选择 StaticSnapshotRepository 或 MySqlRepository。页面只调用读取接口，不直接 import MySQL client。
 
 第一阶段不改现有页面读取方式；等数据库导入和 Repository 测试通过后，再逐个迁移页面。每迁移一组页面，立即执行该组回归。
+
+**P8 实施结果**：接口固化为 `src/lib/facai8/content/repository.ts` 的 26 方法 `ContentRepository` 契约（上述接口全部在内，另含镜像、相关推荐、搜索、标签详情、图标库、站点页面、新链接/文章等）；`source.ts` 导出 `getContentRepository()` 进程内单例，调用链 = `React.cache(错误边界(真实仓库))`（P8-7 请求级去重 + P8-8 故障边界，见 §14）。全部前台页面/组件已迁移：`src/app` 与 `src/components` 对 `src/lib/facai8/data/*` 只剩 4 处 type-only 类型导入，无任何运行时数据依赖。
 
 ### 5.3 导入规则
 
@@ -382,11 +384,11 @@
 - site_link_mirrors：备用链接。
 - articles：文章。
 - bulletins：公告。
-- ads：广告。
-- site_lines：线路。
+- ads：广告。（P6D：migration 0005 将 `id` 转 BIGINT UNSIGNED AUTO_INCREMENT，历史 ID 原样保留，DTO id 为字符串）
+- site_lines：线路。（P6D：同上，`id` 自增化）
 - icon_libraries：图标字体库元数据。
 - site_pages：可选的关于/协议/免责声明/隐私页面内容管理。
-- site_settings：站点键值设置。
+- site_settings：站点键值设置。（P6D：`version` 乐观锁列启用，写入仅允许 6 键白名单）
 - media_assets：上传文件元数据。
 - admin_audit_logs：操作审计。
 - admin_import_runs：快照导入记录。
@@ -443,7 +445,7 @@
 
 建议状态码：
 - 200：读取/更新成功
-- 201：创建成功
+- 200：读取/更新/创建成功（全站实现均用 200 + DTO，未使用 201；P6D 沿用）
 - 204：无响应体删除/注销成功
 - 400：参数错误
 - 401：未登录
@@ -469,14 +471,23 @@
 | GET/PATCH/DELETE | /api/admin/v1/articles/[id] | 文章修改/软删除 |
 | GET/POST | /api/admin/v1/article-categories | 文章分类 |
 | GET/POST | /api/admin/v1/bulletins | 公告 |
-| GET/POST | /api/admin/v1/ads | 广告 |
+| GET/POST | /api/admin/v1/ads | 广告（P6D 已实现：GET 列表支持 position/status/includeDeleted/关键词，POST 新建恒为草稿） |
+| GET/PATCH/DELETE | /api/admin/v1/ads/[id] | 广告详情/更新（乐观锁）/软删除（`?version=`）（P6D） |
+| PATCH | /api/admin/v1/ads/[id]/status | 广告启停 draft→active、active↔disabled、expired→active/disabled（P6D） |
+| POST | /api/admin/v1/ads/[id]/restore | 广告恢复（保留原状态与排序）（P6D） |
+| POST | /api/admin/v1/ads/reorder | 广告排序（同 position 作用域，跨位置 409 REORDER_SCOPE_MISMATCH）（P6D） |
 | GET/POST | /api/admin/v1/tags | 标签 |
-| GET/POST | /api/admin/v1/lines | 线路 |
-| GET/PATCH | /api/admin/v1/settings | 站点设置 |
-| GET | /api/admin/v1/audit-logs | 审计查询 |
-| POST | /api/admin/v1/imports/preview | 导入预检 |
-| POST | /api/admin/v1/imports | 执行导入 |
-| GET | /api/admin/v1/imports/[id] | 导入状态 |
+| GET/POST | /api/admin/v1/lines | 线路（P6D 已实现：POST 新建恒为停用） |
+| GET/PATCH/DELETE | /api/admin/v1/lines/[id] | 线路详情/更新（不含 status）/软删除（P6D） |
+| PATCH | /api/admin/v1/lines/[id]/status | 线路启停 active↔disabled（状态唯一入口）（P6D） |
+| POST | /api/admin/v1/lines/[id]/restore | 线路恢复（保留原状态与排序）（P6D） |
+| POST | /api/admin/v1/lines/reorder | 线路排序（全局作用域，body 拒绝 position）（P6D） |
+| GET/PATCH | /api/admin/v1/settings | 站点设置（P6D 已实现：GET `{settings:{key:{value,version}}}`；PATCH `{items:[{key,value,version}]}` 单事务全有或全无） |
+| GET | /api/admin/v1/audit-logs | 审计查询（P7 已实现：只读；page/pageSize∈{20,50,100}、q/actorUserId/action/resourceType/resourceId/requestId/startDate/endDate、sortBy∈{createdAt,id} 白名单默认 createdAt DESC+id DESC；操作人 join 缺失显示「已删除管理员」；before/after 读取时兜底脱敏；无 PUT/PATCH/DELETE——405） |
+| GET | /api/admin/v1/imports | 导入历史列表（P7 已实现：imports.preview；q/mode/status/snapshotVersion/日期/pageSize∈{20,50,100}/sortBy∈{startedAt,id}；errorSummary 读取时脱敏并截断 2000；CLI 行 startedBy=null，幽灵发起人 startedByDeleted=true） |
+| POST | /api/admin/v1/imports/preview | 导入预检（P7 已实现：imports.preview + CSRF；零写入——不写 admin_import_runs、不写审计；DTO 全部服务端可信：snapshotVersion/checksum/targetDatabase/isProduction/productionAllowed/priorSucceeded/noOpMatched/executable/blockedReason；客户端 body 被忽略；不存在 GET——405） |
+| POST | /api/admin/v1/imports | 执行导入（P7 已实现：imports.execute + CSRF + 预览回执 snapshotVersion/checksum 校验(409) + confirmDatabase 手输精确匹配(422) + 生产双因子 confirmProduction+ADMIN_IMPORT_ALLOW_PRODUCTION(409) + MySQL GET_LOCK 命名锁互斥(409 IMPORT_LOCKED)；成功审计在内容事务内；no-op 审计引用 matched_run_id） |
+| GET | /api/admin/v1/imports/[id] | 导入记录详情（P7 已实现：imports.preview 只读；404 IMPORT_RUN_NOT_FOUND；无 PUT/DELETE——405） |
 
 分页参数：
 - page：从 1 开始。
@@ -520,12 +531,37 @@
 - 发布/撤回动作必须写审计日志。
 - 文章浏览量只允许服务端受控递增，不接受客户端任意写入。
 
-### 9.4 广告
+### 9.4 广告（P6D 已实施）
 
 - 保存位置、标题、图片、目标 URL、排序、状态、开始和结束时间。
-- 前台读取时按 position、status、时间窗口和 sort_order 过滤。
-- 不在管理端预览时自动访问广告目标地址。
+- 位置 allowlist：当前仅 `home`（首页）；服务端枚举校验，未知位置 422。
+- DB 状态机（`status` 列）：`draft`/`active`/`disabled`/`expired` 四态——新建恒为 `draft`；启停只走 `PATCH [id]/status`：draft→active、active↔disabled、expired→active/disabled，同状态请求 422。
+- `effectiveStatus` 为 DTO 只读推导字段（status=active 且落在 startsAt/endsAt 时间窗内才为 active，到期 active 展示 expired），不落库、不参与写校验。
+- 投放时间：`startsAt < endsAt` 成对校验；留空分别表示立即生效（启用后）与不限结束。
+- 图片路径：站内路径（`/` 开头），复用统一媒体策略（根前缀白名单 + 已知图片后缀 + 禁 SVG/HTML/查询串/外链）且**服务端做磁盘存在性校验**（`src/lib/admin/security/media-file.ts`，server-only）；legacy `/uploads/...` 按 basename 映射 `public/sites/facai8/images/`（镜像前台冻结 asset() 口径）；缺文件 422。
+- 不在管理端预览时自动访问广告目标地址：`targetUrl` 仅做完整 http(s) 格式硬校验（禁 `javascript:`/`data:` 等），服务端零远端抓取（无 SSRF）；UI 预览只打开站内图片。
+- 排序：`POST /ads/reorder` 限定同 position 作用域，跨位置混批 409 `REORDER_SCOPE_MISMATCH`；逐行 version 乐观锁，单事务整批回滚。
+- 删除/恢复：`deleted_at` 软删除；恢复保留原状态、排期与排序值。
+- 前台读取时按 position、status、时间窗口和 sort_order 过滤（P8 前前台仍读静态快照）。
 - 广告的合法性、素材授权和展示地区限制由运营方确认。
+
+### 9.5 线路（P6D 已实施）
+
+- 字段：name、url、status、sort_order、version、deleted_at。
+- 新建恒为 `disabled`（防止未经核验的线路直接对外）。
+- 状态只走 `PATCH /lines/[id]/status`（active↔disabled）；通用 PATCH 不接受 status 字段。
+- URL 仅格式校验（完整 http(s)，复用 checkHttpUrl），保存时**不做可达性探测**——可达性检测属前台既有能力。
+- 排序为全局作用域（无 position 维度）；reorder body 出现 position 字段即 422。
+- 软删除/恢复保留原状态与 sortOrder；回收站 = `includeDeleted=true` 筛选。
+
+### 9.6 站点设置（P6D 已实施）
+
+- 键白名单（6 个）：`site_name`、`site_description`、`site_logo`、`site_favicon`、`footer_text`、`ads_random`；未知键 422 `SETTINGS_UNKNOWN_KEY`，禁止任意键/环境配置写入。
+- 值按类型校验：文本长度限制、媒体键走统一媒体策略 + 磁盘存在性（缺文件 422 `SETTINGS_MEDIA_MISSING`）、`ads_random` 仅布尔。
+- `GET /settings` 返回 `{settings:{key:{value,version}}}`；行缺失时懒初始化（幂等 ODKU no-op，version=1）。
+- `PATCH /settings`：`{items:[{key,value,version}]}` 单事务全有或全无——按 key 排序后逐行 `FOR UPDATE` 锁行防死锁，version 不符 409（消息与全站乐观锁文案一致），成功逐键 version+1，同事务写 `setting.update` 审计。
+- 历史遗留双编码 JSON 值读取时仅当再解析结果为 string 才解包；写回一律干净 JSON。
+- 媒体键（logo/favicon）UI 提供站内缩略预览（legacy `/uploads/` 路径映射口径与广告一致）。
 
 ## 10. 事务、并发与缓存
 
@@ -591,6 +627,19 @@
 4. 是否需要运营人员多角色协作；如暂时只有一个管理员，仍保留 RBAC 结构但先只启用 super_admin。
 5. 是否要管理关于、用户协议、免责声明、隐私页面；建议放第二期。
 6. 是否要建立真正的会员、评论、收藏和投稿审核系统；这属于独立业务，不应混入第一期静态内容管理。
+
+## 14. P8 前台数据源实施记录（2026-11-12）
+
+P8（前台内容读取迁移到统一 Content Repository）已实施并通过验证，关键实现决策如下（完整交付报告：`docs/P8_FRONTEND_MIGRATION_REPORT.md`；平价证据：`docs/P8_DATA_PARITY_REPORT.md`；切换/回退：`docs/P8_ROLLBACK_RUNBOOK.md`）：
+
+- **目录结构**：`src/lib/facai8/content/` 下 `repository.ts`（26 方法契约 + 搜索封顶 `SEARCH_LINK_LIMIT=200`/`SEARCH_ARTICLE_LIMIT=100`）、`types.ts`（客户端安全 DTO）、`static-repository.ts` / `mysql-repository.ts`（双实现）、`rules.ts`（搜索匹配/相关推荐/摘要/可见性的共享纯函数，保证两源逐字符同规则）、`source.ts`（单例 + 去重 + 故障边界）、`errors.ts`（server-only `ContentSourceError`）。
+- **公开可见性统一契约**（`repository.ts` 头注释为准）：links=`status='published' AND deleted_at IS NULL`（isGone 仍可见，前台渲染「已失效」徽章）；articles/bulletins 叠加 `published_at ≤ DB UTC 时钟`；ads 叠加投放窗口。交付后修复轮（2026-11-12）补齐两条：详情/备用链接可见性**继承所属链接**（`getLinkDetail`/`getLinkMirrors` 自带 `linkPublic()` 门槛 → null/[]，不再依赖调用方先查 `getLinkById`）；首页「最近更新」= `site_settings.recent_links` JSON 快照按 ID 重读链接**当前状态与当前字段值**（`getSiteSettings`/`getRecentLinks` 共用同一过滤助手，停用/软删/改名下一次请求即反映）。
+- **数据层补充迁移**：`0006`（settings 编码修复 + `site_links.tag_sort_order`）、`0007`（`site_links.archive_sort_order`）配合回填脚本，使 mysql 侧列表序与静态档案序/标签序恒等；迁移总数 tripwire 更新为 8。
+- **页面迁移**：54 条/页分页、URL、空态语义（公告缺失≠404、分类/标签缺失=页内「不存在」）全部保持；`Header`/`SiteFooter` 改服务端组件直读仓库，`Search`/`SubmitArticle` 等客户端组件纯 props 化；SEO `generateMetadata` 与页面同源。
+- **util 拆分**：`util.ts` 只留纯客户端安全函数；触达静态数据的函数原样复制为 `util-static-data.ts`（冻结平价预言机，仅服务端/测试引用），保证浏览器包不再被打入内容数据。
+- **渲染与缓存（P8-7 核查结论）**：未开 `cacheComponents`，build 路由清单确认前台全部路由为动态 `ƒ`，无构建期内容缓存；同一请求内 page/generateMetadata/layout 多次调用同一方法由 React `cache()` 门面去重（官方「Deduplicating requests」模式），去重作用域=单请求、失败 Promise 同请求共享；以 MySQL `performance_schema.events_statements_history_long` 采样取证。
+- **故障合同（P8-8）**：任一仓库方法抛错 → `ContentSourceError`（固定消息「内容数据服务暂时不可用（`<source>`），请求编号 `<32hex>`」，SQL/凭据只进服务端日志），HTTP 500 + Next 错误壳，hydration 后展示「服务暂时不可用」错误视图（`src/app/error.tsx` / `global-error.tsx`，Next 16 error boundary prop 为 `retry`）；绝不静默回退静态数据。Next 生产 SSR 不把服务端错误 message 序列化进 flight（仅 `digest`），32hex 编号经日志 `digest` 行关联排障。
+- **回归守卫**：`scripts/p8-dual-render-check.mjs`（双模 39 路径归一化 DOM 字节对比）、`scripts/p8-static-hash.mjs` + `docs/P8-static-baseline.json`（静态面冻结）、`scripts/p8-dedup-probe.mjs`（去重取证）。
 
 ---
 **实施入口：** 阅读 docs/ADMIN_SYSTEM_IMPLEMENTATION_PLAN.md，再按 docs/skills/admin-system-development/SKILL.md 的阶段执行。数据库 DDL 以 docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql 为准；安全和测试以 docs/ADMIN_SYSTEM_SECURITY_AND_TESTING.md 为准。

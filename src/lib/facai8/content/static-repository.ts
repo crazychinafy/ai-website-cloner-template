@@ -5,6 +5,10 @@
 //   - 标签链接 = TAG_ORDER 序列优先、其余按档案序追加
 //   - 文章 = createdAt 降序、id 数值降序（前台文章列表页规则）
 //   - 分类/标签/线路/广告/公告 = 源站数组序
+// P8-1 补充：搜索 / 相关推荐 / 首页分组 / 单条主记录读取走 rules.ts 同一份纯函数；
+//   静态档案是发布态快照（2026-11-08 前全部已发布、无草稿无软删），满足 repository.ts 公开可见性
+//   契约谓词，故静态侧无需再过滤。文章搜索命中序 = createdAt 降序、id 降序（列表规范序，
+//   与 MySQL 侧 (published_at,id) DESC 恒等；档案原始数组序在 MySQL 无对应列，P4 起即弃用）。
 import { LINK_CATEGORIES, type CatNode } from "../data/categories.ts"
 import { ALL_LINKS } from "../data/links.ts"
 import { CAT_ORDER, TAG_ORDER, applyLinkOrder } from "../data/link-order.ts"
@@ -23,7 +27,9 @@ import { HOME_POPUP } from "../data/popup.ts"
 import { STATS } from "../data/stats.ts"
 import { RECENT_LINKS } from "../data/recent-links.ts"
 import { SEARCH_DESCRIPTIONS } from "../data/searchDescriptions.ts"
+import { SEARCH_ARTICLE_LIMIT, SEARCH_LINK_LIMIT } from "./repository.ts"
 import type { ArticleQuery, ContentRepository } from "./repository.ts"
+import { articleExcerpt, pickRelatedArticles, pickRelatedLinks, searchHit } from "./rules.ts"
 import type {
   AdDto,
   ArticleCategoryDto,
@@ -37,6 +43,9 @@ import type {
   LinkMirrorDto,
   MiniArticleDto,
   MiniLinkDto,
+  SearchArticleDto,
+  SearchLinkDto,
+  SearchResults,
   SitePageDto,
   SiteSettingsDto,
   TagDto,
@@ -97,11 +106,38 @@ function toCatDto(c: CatNode): CatNodeDto {
   }
 }
 
+/**
+ * 文章列表规范序（createdAt 降序、id 数值降序）—— getArticles / 搜索 / 相关推荐共用，
+ * 杜绝规则漂移；MySQL 侧对应 ORDER BY published_at DESC, id DESC（快照行 published_at = createdAt）。
+ */
+function canonArticles(): (typeof ALL_ARTICLES)[number][] {
+  return [...ALL_ARTICLES].sort((a, b) =>
+    a.createdAt === b.createdAt ? cmpId(b.id, a.id) : cmpDate(b.createdAt, a.createdAt),
+  )
+}
+
+/** 链接点击数（link-details 存档；无档 = 0，与 util.linkClicks 逐位一致） */
+function linkClicks(id: string): number {
+  const d = LINK_DETAILS[id]
+  return d ? parseInt(d.clickCount, 10) || 0 : 0
+}
+
 export class StaticSnapshotRepository implements ContentRepository {
   readonly source = "static" as const
 
   async getHomeCategories(): Promise<CatNodeDto[]> {
     return LINK_CATEGORIES.map(toCatDto)
+  }
+
+  async getLinksGroupedForHome(): Promise<Record<string, LinkItemDto[]>> {
+    // 首页契约（= page.tsx groupLinks）：档案原始序（ALL_LINKS 数组序）按 categoryId 追加分组，不排序、不切片
+    const m: Record<string, LinkItemDto[]> = {}
+    for (const l of ALL_LINKS) {
+      const arr = m[l.categoryId]
+      if (arr) arr.push(toLinkDto(l))
+      else m[l.categoryId] = [toLinkDto(l)]
+    }
+    return m
   }
 
   async getLinksByCategory(categoryId: string): Promise<LinkItemDto[]> {
@@ -148,14 +184,56 @@ export class StaticSnapshotRepository implements ContentRepository {
   }
 
   async getArticles(query?: ArticleQuery): Promise<ArticleDto[]> {
-    let rows = ALL_ARTICLES
+    let rows = canonArticles()
     if (query?.categoryId) rows = rows.filter((a) => a.categoryId === query.categoryId)
-    return [...rows].sort((a, b) => (a.createdAt === b.createdAt ? cmpId(b.id, a.id) : cmpDate(b.createdAt, a.createdAt))).map((a) => ({ ...a }))
+    return rows.map((a) => ({ ...a }))
   }
 
   async getArticleById(id: string): Promise<ArticleDto | null> {
     const a = ALL_ARTICLES.find((x) => x.id === id)
     return a ? { ...a } : null
+  }
+
+  async getRelatedLinksForArticle(articleId: string): Promise<LinkItemDto[]> {
+    const a = ALL_ARTICLES.find((x) => x.id === articleId)
+    if (!a) return []
+    // 候选 = 未失效链接按档案原始序（= MySQL 侧 (sort_order,id) 序，P4 已验证恒等；静态档案全量即公开集）
+    const candidates = ALL_LINKS.filter((l) => l.isGone !== 1).map((l) => ({ item: l, clicks: linkClicks(l.id) }))
+    return pickRelatedLinks(candidates, a.title).map(toLinkDto)
+  }
+
+  async getRelatedArticlesForLink(linkId: string): Promise<ArticleDto[]> {
+    const l = linkById.get(linkId)
+    if (!l) return []
+    // 候选喂列表规范序（与 MySQL 侧同序）。与旧 util 的档案序喂入差异可证明不存在：
+    // 28 篇文章小写标题零重复（去重首现与喂入序无关）、createdAt 零并列（降序排序结果确定）——p8-parity 测试断言逐位一致
+    return pickRelatedArticles(canonArticles(), l.title).map((a) => ({ ...a }))
+  }
+
+  async searchLinks(query: string): Promise<SearchResults<SearchLinkDto>> {
+    const s = query.trim().toLowerCase()
+    if (!s) return { items: [], total: 0, truncated: false }
+    const hits = ALL_LINKS.filter((l) => searchHit(l.title, s) || searchHit(l.description, s))
+    const items = hits
+      .slice(0, SEARCH_LINK_LIMIT)
+      .map((l) => ({ ...toLinkDto(l), categoryName: catName.get(l.categoryId) ?? "" }))
+    return { items, total: hits.length, truncated: hits.length > items.length }
+  }
+
+  async searchArticles(query: string): Promise<SearchResults<SearchArticleDto>> {
+    const s = query.trim().toLowerCase()
+    if (!s) return { items: [], total: 0, truncated: false }
+    // 命中按列表规范序（createdAt 降序、id 降序）—— MySQL 侧 ORDER BY published_at DESC,id DESC 恒等
+    const hits = canonArticles().filter((a) => searchHit(a.title, s) || searchHit(a.content, s))
+    const items = hits.slice(0, SEARCH_ARTICLE_LIMIT).map((a) => ({
+      id: a.id,
+      title: a.title,
+      categoryName: a.categoryName,
+      // description 源站搜索接口快照优先（11 条新旧截断逻辑混存不可单规则复现），缺失回退统一规则
+      description: SEARCH_DESCRIPTIONS[a.id] ?? articleExcerpt(a.content),
+      createdAt: a.createdAt,
+    }))
+    return { items, total: hits.length, truncated: hits.length > items.length }
   }
 
   async getNewLinks(): Promise<MiniLinkDto[]> {
@@ -178,8 +256,7 @@ export class StaticSnapshotRepository implements ContentRepository {
 
   async getNewArticles(): Promise<MiniArticleDto[]> {
     // 源站 /api/public/new-articles 语义 = 文章 createdAt 降序（id 降序 tiebreak）top 8（已验证一致）
-    return ALL_ARTICLES.slice()
-      .sort((a, b) => (a.createdAt === b.createdAt ? cmpId(b.id, a.id) : cmpDate(b.createdAt, a.createdAt)))
+    return canonArticles()
       .slice(0, 8)
       .map((a) => ({ id: a.id, title: a.title, categoryName: a.categoryName }))
   }
@@ -188,12 +265,22 @@ export class StaticSnapshotRepository implements ContentRepository {
     return BULLETINS.map((b) => ({ id: b.id, title: b.title, createdAt: b.createdAt, content: b.content }))
   }
 
+  async getBulletinById(id: string): Promise<BulletinDto | null> {
+    const b = BULLETINS.find((x) => x.id === id)
+    return b ? { id: b.id, title: b.title, createdAt: b.createdAt, content: b.content } : null
+  }
+
   async getAds(): Promise<AdDto[]> {
     return HOME_ADS.map((a) => ({ id: a.id, linkUrl: a.linkUrl, imageUrl: a.imageUrl, title: a.title }))
   }
 
   async getTags(): Promise<TagDto[]> {
     return TAGS.map((t) => ({ id: t.id, name: t.name, icon: t.icon, color: t.color, bgColor: t.bgColor }))
+  }
+
+  async getTagById(tagId: string): Promise<TagDto | null> {
+    const t = TAGS.find((x) => x.id === tagId)
+    return t ? { id: t.id, name: t.name, icon: t.icon, color: t.color, bgColor: t.bgColor } : null
   }
 
   async getLines(): Promise<LineDto[]> {

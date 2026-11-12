@@ -1,7 +1,15 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CatNode } from '@/lib/facai8/data/categories'
-import type { LinkItem } from '@/lib/facai8/data/links'
+import type {
+  AdDto,
+  BulletinDto,
+  CatNodeDto,
+  LinkItemDto,
+  MiniArticleDto,
+  MiniLinkDto,
+  SiteSettingsDto,
+  TagDto,
+} from '@/lib/facai8/content/types'
 import { SideNav } from './SideNav'
 import { CatSection, type CatSectionData } from './CatSection'
 import { HomeRail } from './HomeRail'
@@ -10,12 +18,30 @@ import { AdPromo } from './AdPromo'
 import { MobileCatDrawer } from './MobileBar'
 
 interface Props {
-  cats: CatNode[]
-  linksByCategory: Record<string, LinkItem[]>
+  cats: CatNodeDto[]
+  linksByCategory: Record<string, LinkItemDto[]>
+  bulletins: BulletinDto[]
+  ads: AdDto[]
+  stats: SiteSettingsDto['stats']
+  newLinks: MiniLinkDto[]
+  newArticles: MiniArticleDto[]
+  recentLinks: MiniLinkDto[]
+  tagsById: Record<string, TagDto>
 }
 
 // 首页三栏客户端壳：左栏导航 ↔ 分类区块 联动（滚动/展开/切 tab）
-export function HomeShell({ cats, linksByCategory }: Props) {
+// P8-4：全部首屏数据（公告/广告/统计/最新收录/最新文章/最近更新/标签映射）由页面（服务端仓库）注入。
+export function HomeShell({
+  cats,
+  linksByCategory,
+  bulletins,
+  ads,
+  stats,
+  newLinks,
+  newArticles,
+  recentLinks,
+  tagsById,
+}: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(cats.slice(0, 3).map((c) => c.id))
   )
@@ -80,7 +106,7 @@ export function HomeShell({ cats, linksByCategory }: Props) {
   const sections = useMemo<CatSectionData[]>(
     () =>
       cats.map((cat) => {
-        const bySub: Record<string, LinkItem[]> = {}
+        const bySub: Record<string, LinkItemDto[]> = {}
         for (const c of cat.children) bySub[c.id] = linksByCategory[c.id] || []
         return { cat, own: linksByCategory[cat.id] || [], bySub }
       }),
@@ -92,8 +118,8 @@ export function HomeShell({ cats, linksByCategory }: Props) {
       <MobileCatDrawer cats={cats} onPick={pickFromSidebar} />
       <SideNav cats={cats} title="网址分类" onPick={pickFromSidebar} />
       <main className="content home-content">
-        <Bulletins />
-        <AdPromo />
+        <Bulletins items={bulletins} />
+        <AdPromo ads={ads} />
         {sections.map((s) => (
           <CatSection
             key={s.cat.id}
@@ -101,6 +127,7 @@ export function HomeShell({ cats, linksByCategory }: Props) {
             expanded={expanded.has(s.cat.id)}
             activeSubId={s.cat.children.length ? activeSubs[s.cat.id] ?? s.cat.children[0].id : null}
             onTab={setTab}
+            tagsById={tagsById}
             innerRef={(el) => {
               if (el) {
                 el.dataset.catid = s.cat.id
@@ -112,7 +139,7 @@ export function HomeShell({ cats, linksByCategory }: Props) {
           />
         ))}
       </main>
-      <HomeRail />
+      <HomeRail stats={stats} newLinks={newLinks} newArticles={newArticles} recentLinks={recentLinks} />
     </div>
   )
 }

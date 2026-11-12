@@ -2,24 +2,22 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import type { Article } from '@/lib/facai8/data/articles'
-import type { LinkItem } from '@/lib/facai8/data/links'
-import type { Ad } from '@/lib/facai8/data/ads'
-import type { LinkDetailExtra } from '@/lib/facai8/data/link-details'
-import type { LinkMirror } from '@/lib/facai8/data/link-mirrors'
+import type { ArticleDto, AdDto, LinkDetailDto, LinkItemDto, LinkMirrorDto, TagDto } from '@/lib/facai8/content/types'
 import type { SessionUser } from '@/lib/facai8/auth'
-import { asset, displayUrl, fmtDate, fmtK, gstaticFavicon, localHtml, tagById } from '@/lib/facai8/util'
+import { asset, displayUrl, fmtDate, fmtK, gstaticFavicon, localHtml } from '@/lib/facai8/util'
 import { toast } from '@/components/sites/facai8/Toast'
 
 // 探测状态：null=检测中(灰/琥珀) ok=绿 fail=红
 type PingState = 'ok' | 'fail' | null
 
 interface Props {
-  link: LinkItem
-  extra: LinkDetailExtra
-  mirrors: LinkMirror[]
-  related: Article[]
-  ads: Ad[]
+  link: LinkItemDto
+  extra: LinkDetailDto
+  mirrors: LinkMirrorDto[]
+  related: ArticleDto[]
+  ads: AdDto[]
+  /** 标签徽标数据（P8-4：服务端仓库注入；无标签/无徽标 → null） */
+  tag: TagDto | null
   user: SessionUser | null
 }
 
@@ -44,11 +42,10 @@ const FB_TYPES = [
 ]
 
 // 站点详情：预览图(lightbox) + link-head + 评论/相关文章侧栏 + 访问链接/备用链接/广告/详情介绍
-export function LinkDetail({ link, extra, mirrors, related, ads, user }: Props) {
+export function LinkDetail({ link, extra, mirrors, related, ads, tag, user }: Props) {
   const router = useRouter()
   const wide = related.length > 0
   const isGone = link.isGone === 1
-  const tag = tagById(link.tagId)
 
   const [clicks, setClicks] = useState(parseInt(extra.clickCount, 10) || 0)
   const [likes, setLikes] = useState(parseInt(extra.likeCount, 10) || 0)

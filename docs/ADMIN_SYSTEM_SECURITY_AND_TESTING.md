@@ -272,3 +272,45 @@
 ## 14. 明确未包含的风险承诺
 
 本文件是工程安全要求，不代表已经完成安全审计或渗透测试。未执行的测试不得标记通过。正式公网开放前建议进行独立安全审查。
+
+## 15. P6D 实施与测试执行记录（2026-11-12）
+
+P6D（广告 / 线路 / 站点设置）已按下述规范实施并通过测试：
+
+- **RBAC**：复用 seed 既有权限码 `ads.view/create/update/delete`、`lines.*`、`settings.view/settings.update`；全部在 API Handler 层强制（403 无副作用、不写审计）；UI 按权限标志隐藏对应动作。auditor 三角色只读实测通过。
+- **CSRF / Origin**：沿用 P3 组合防护；P6D 全部写路由（POST/PATCH/DELETE）实测携带 `X-CSRF-Token` 通过。开发环境注意：`ADMIN_CSRF_SECRET` 缺省时按进程随机回退，Turbopack 热重编译会轮换密钥导致刷新后写请求 403（生产必须显式配置，已在 env 校验中 fail-closed）。
+- **SSRF 防护**：广告 `targetUrl` 与线路 `url` 仅做完整 http(s) 格式校验（禁 `javascript:`/`data:`/`file:` 等），服务端与后台 UI 均不发起对目标地址的抓取；UI 预览只打开站内图片路径。
+- **媒体路径安全**：广告 imagePath、settings `site_logo`/`site_favicon` 走统一媒体策略（根前缀白名单 + 已知图片后缀 + 禁 SVG/HTML/查询串/外链）并叠加服务端磁盘存在性校验（`src/lib/admin/security/media-file.ts`，server-only；legacy `/uploads/...` 按 basename 映射 `public/sites/facai8/images/`，与前台冻结 asset() 同口径）；缺文件 422。
+- **审计**：`ad.*`、`line.*`（create/update/status/reorder/soft_delete/restore）与 `setting.update` 均在写事务内落库；403/409/422 不产生日志；跳转 URL 编辑仅记摘要/长度/哈希（`url-audit.ts`）。
+- **并发保护**：所有 P6D 写路径逐行 `version` 乐观锁（409 统一文案），reorder/settings 批量为单事务整批回滚；settings 按键名排序 `FOR UPDATE` 锁行，实测外部抢先保存触发 UI 409 静默回取版本。
+- **测试**：`npm run test:admin` = vitest 39 文件 / 684 用例全绿（真实 MySQL scratch 库 `facai8_p6d_test`）；P6D 新增 `p6d-ads-api`、`p6d-lines-api`、`p6d-settings-api`、`p6d-media-path` 4 个测试文件（+ `p6d-harness` 夹具）；未删除或放宽任何既有用例。lint / typecheck / build 全部通过。
+- **前台冻结回归**：`src/lib/facai8/data/` 20 文件 blob 与基线 20/20 逐字节一致；`src/lib/facai8`、`public` git diff 为空；`CONTENT_SOURCE=static` 下 9 条前台路由（/、/lines、/articles、文章详情、公告详情、/about、/agreement、/disclaimer、/privacy）全部 200。
+
+## 16. P7 实施与测试执行记录（2026-11-12）
+
+P7（仪表盘 / 审计日志 / 导入管理）已按下述规范实施并通过测试：
+
+- **仪表盘真实统计**：`/admin` 全部数字来自单条 `SELECT (subquery) AS key ...` 聚合（每指标一次 COUNT，无 N+1、无 JS 侧数组长法）；每张卡带「口径」标签（如 `site_links 未删除行数（deleted_at IS NULL）`）；权限不含的指标不查询不展示（按会话权限过滤，而非仅隐藏）；「权限 46 项」等旧硬编码改为实时 COUNT；DB 故障返回 `source:"db_error"` → UI 显示「数据库连接异常 / 统计暂不可用」，绝不显示 0（不造假数据）。仪表盘与审计筛选项均无独立 API（服务端组件直读，减少鉴权面）。
+- **审计日志只读**：`GET /api/admin/v1/audit-logs`（GET-only，PUT/PATCH/DELETE 405 桩；页面无编辑/删除/清账入口）。过滤：q/actorUserId/action/resourceType/resourceId/requestId/startDate/endDate + page/pageSize∈{20,50,100} + sortBy 白名单 `createdAt|id`（默认 createdAt DESC、次级 id DESC 保证同秒分页稳定）；操作人 leftJoin，用户已删除显示「已删除管理员」且不丢行；筛选下拉选项取 DISTINCT 实时数据（各限 200）。
+- **IP VARBINARY(16) 解码**：修复两处字符集污染缺陷——mysql2 按连接 charset 文本解码 ≥0x80 字节（曾致「253.253.x.x」假 IP）：① 池级 `typeCast`（`src/lib/db/mysql-cast.ts`，表.列白名单）覆盖裸池读；② 规范读路径改用 SQL `hex(ip_address)` 投影（drizzle 查询级注入自己的 typeCast，池配置无法覆盖），解码器认 8/32 位 hex（可证不歧义），支持 IPv4 / IPv6 / IPv4-mapped，NULL → 「—」。浏览器实测 `::1` 正确显示。旧 MySQL（无 INET6ATON）写入用 `X'<hex>'` 字面量。
+- **统一脱敏（redactor）**：`before/after` 在**写库前**与**读取后**双通道脱敏（读侧只影响 DTO，永不回写 DB 行）；递归对象/数组，深度 16 / 列表 200 / 字符串 8192 上限，超限与循环引用打中文标记；键名 `pin/otp/auth` 精确匹配、`authorization/session/signature` 子串匹配 → `***`；自由文本 `api_key":"x"`、`key=value` 形态一并遮蔽；任何脱敏异常 fail-closed（「脱敏失败，原值已隐藏」）。详情弹窗 `<pre>` 纯文本渲染，无 innerHTML → 无 XSS 面。
+- **导入管理（复用 P4 核心，无第二套实现）**：预览 = core dry-run（SELECT only），实测 runs 与审计行数前后一字不变、DTO 全部服务端可信（snapshotVersion/checksum 为服务端现值、targetDatabase 为服务端连接库名、客户端 body 完全被忽略）；差异引擎 13 表五类差异（missing/extra/changed/order_changed/relation_error），明细列表 100 条上限 + truncated 标志（统计为全量）。执行安全门顺序：权限 → CSRF → 回执版本 409 → 回执 checksum 409 → confirmDatabase 手输精确匹配 422 → 生产双因子（confirmProduction + `ADMIN_IMPORT_ALLOW_PRODUCTION=1`）409 → `GET_LOCK('facai8_import_<db>',0)` 命名锁跨进程互斥 409 IMPORT_LOCKED（finally 释放；实测外部连接占用返回 409、导入结束立即可获锁）。成功导入审计在内容事务内（审计失败 → 内容回滚）；no-op 独立补记审计并引用 matched_run_id（不假装没发生）；历史只读（含 CLI 行 startedBy=null、幽灵发起人 startedByDeleted=true、errorSummary 读取时脱敏 + 截断 2000）。修复差异引擎回归：site_links `aux` 缺 `tagId` 致 3791 快照行全量误报「标签 undefined 不存在」（已补字段 + 回归测试）。
+- **RBAC**：复用 seed 既有权限码 `dashboard.read`、`audit_logs.read`、`imports.preview`、`imports.execute`（无新迁移、无新角色）；API Handler 层强制 403（auditor 有 audit/preview 无 execute 实测通过；菜单隐藏 ≠ 授权）；BIGINT 全部以十进制字符串出 DTO。
+- **测试**：`npm run test:admin` = vitest 48 文件 / 785 用例全绿（P2–P6D 既有 684 用例一个未删未放宽；P7 新增 `p7-redactor`、`p7-ip-decoder`、`p7-import-compare`、`p7-dashboard`、`p7-audit-api`、`p7-import-preview`、`p7-import-execute`、`p7-import-history`、`p7-nav` 9 文件 + `p7-harness` 夹具，真实 MySQL scratch 库 `facai8_p7_test`；含 4182 行真实导入全链路断言）。lint / typecheck / build 全部通过（6 条 P7 路由进入构建清单）。
+- **浏览器走查**：`/admin`（真实统计 + 口径 + 最近导入 #1）、`/admin/audit-logs`（39 条真实日志、筛选、详情脱敏 JSON `<pre>`、`::1` IP）、`/admin/imports`（预览差异卡片：site_links 快照 3791/库 3792 多余 1 展示真实自然键；开发库因已有 CLI 导入 → 预览正确结论「不可执行 + 拒绝原因」且「执行导入…」按钮禁用；历史 CLI 行详情含 13 表明细）——三页控制台 0 错误。
+- **前台冻结回归**：`git diff -- src/lib/facai8/data/` 为空；10 条前台路由（/、/lines、/articles、文章详情、公告详情、/about、/agreement、/disclaimer、/privacy、/category/[id]）全部 200。
+- **已知边界（非缺陷）**：审计日志暂无保留/归档策略（只读不可删是本期合同，清账属 P9 运维项）；导入仅支持「首次导入 / 同版本同 checksum no-op」两种可执行形态，非空库的增量合并需差异报告另行授权（预览已明示）；前台 MySQL 数据源切换属 P8，未开始。
+
+## 17. P8 实施与测试执行记录（2026-11-12）
+
+P8（前台内容读取迁移到统一 Content Repository，`CONTENT_SOURCE=static|mysql` 双源）已按下述规范实施并通过测试（交付报告：`docs/P8_FRONTEND_MIGRATION_REPORT.md`；平价证据：`docs/P8_DATA_PARITY_REPORT.md`；切换/回退：`docs/P8_ROLLBACK_RUNBOOK.md`）：
+
+- **读取入口唯一化**：前台全部页面/组件只经 `getContentRepository()`（`src/lib/facai8/content/source.ts` 进程内单例）读取内容；`src/app` + `src/components` 对 `src/lib/facai8/data/*` 的值导入清零（仅 4 处 type-only 类型导入，编译期擦除）；`Header`/`SiteFooter` 改服务端组件，`Search`/`SubmitArticle` 等客户端组件纯 props 化，浏览器包内不再含内容数据（`.next/static/chunks` JS 产物无内容 ID 实测）。数据源只由环境变量 + 重启决定：无 URL 参数切源、无运行期热切换。
+- **不静默回退（故障合同）**：选定 mysql 后 DB 出错绝不返回旧静态值——每个仓库方法经 `withContentErrorBoundary` 包裹，失败抛 server-only `ContentSourceError`，消息固定「内容数据服务暂时不可用（`<source>`），请求编号 `<32hex>`」（uuid 去连字符，逐请求随机）；原始 SQL/驱动错误与凭据只进服务端日志（`[content-error] source=… method=…() requestId=…` + 原错），不出现在响应消息中。死库实况 E2E（`DB_NAME=facai8_p8_nope` 故意不存在）：11 条代表路径（首页/链接详情/文章列表与详情/公告/分类/标签/线路/搜索/关于/登录）全部 **HTTP 500**，响应体无任何静态内容特征 ⇒ 无回退；同一请求内失败 Promise 经 React.cache 共享（不雪崩重查，同请求消费方一致 500）。
+- **SSR 防泄漏契约（Next 16 生产实测）**：SSR 错误响应为 `__next_error__` 壳（robots=noindex、HTTP 500），flight 仅携带 `E{"digest":"…"}`——Next 生产模式不把服务端错误 message 序列化进响应；32hex 请求编号经服务端日志中 `[content-error]` 行与 Next 相邻的 `digest: '<n>'` 关联排障，用户在 hydration 后的错误视图（`src/app/error.tsx` / `global-error.tsx`，Next 16 error boundary prop 为 `retry`）看到「服务暂时不可用」+「请求编号：…」+ 返回首页/重试（浏览器 DOM 实测通过）。错误视图复用 NotFound 同款样式，无视觉改版。
+- **请求级去重（P8-7）**：核查确认未开 `cacheComponents`、前台全部路由为动态 `ƒ`（build 路由清单），无构建期内容缓存、无跨请求陈旧共享风险；26 个契约方法按 Next 16 官方「Deduplication」模式包 React `cache()` 门面（page + generateMetadata + layout 同请求多次调用合并为一次查询）。取证不用 general_log（连接池已有连接不受 `SET GLOBAL` 影响），改用 `performance_schema.events_statements_history_long` 采样：单请求内 `site_settings` 恰 1 条 SELECT、无重复文本 SELECT、新请求重新查询。
+- **数据平价守卫**：`scripts/p8-dual-render-check.mjs` 同一构建双模起服（static:3111 / mysql:3112→`facai8_p8_test`，导入 checksum `251537…3e915f` 与 P4/P7 审计一致），先预热再对固定 39 路径做归一化 DOM 字节对比（仅中和 nonce/flight/preload/metadata 顺序等运行时噪声）——**ALL_MATCH 39/39**（P8 最终构建复跑两次一致）；契约层 `p8-rules` 38 + `p8-parity` 56（真实数据双实现逐字段深比较）+ `p8-visibility` 17（草稿/软删/停用/未来定时发布两源均不可见；公告缺失=页内空态非 404）。搜索服务端封顶 `SEARCH_LINK_LIMIT=200` / `SEARCH_ARTICLE_LIMIT=100`，「共 N 条」仍显示全量总数（与静态侧文案一致）。
+- **静态面冻结**：`scripts/p8-static-hash.mjs` + `docs/P8-static-baseline.json` 守卫——`src/lib/facai8/data/` 20 文件 SHA-256 与基线 20/20 一致、受保护面（含 `public/sites/facai8`、`facai8.css`、`iconfont.css`、`globals.css`）2759 文件 0 mismatch、受保护路径 `git diff` 为空；P8 全程无任何视觉改动。
+- **测试与门禁**：`npm run test:admin` = vitest 52 文件 / 904 用例全绿（P2–P7 既有 785 用例一个未删未放宽；P8 新增 4 文件 119 用例：`p8-rules` 38、`p8-parity` 56、`p8-visibility` 17、`p8-content-error` 8，另 `p8-harness` 夹具走真实导入对照库纪律——`facai8_p8_test` 仅导入+只读，vitest 永不写入）。lint / `tsc --noEmit` / `npm run build` 全部 exit 0；五个迁移组每组后均跑全套门禁 + 当组双渲染（8/8、14/14、20/20、21/21、36/36 至最终 39/39）。
+- **已知边界（非缺陷）**：SSR 首屏错误壳不内嵌 32hex 编号（Next 生产防泄漏行为），编号在 hydration 后视图与服务端日志可得，纯 SSR 可见编号需 layout 层自建错误处理（本期不做）；mysql 侧为大表全读 + 内存映射（与静态侧同构读取形状），当前数据量（链接 ~3.8k / 文章 ~400）正常，十万级需索引化真分页（P9+ 观察项）；`util-static-data.ts` 平价预言机与 `data/*` 同属冻结面，改 data 必须同步预言机或重跑 P8 平价回归；生产尚未切换（默认仍 `CONTENT_SOURCE=static`），切换与回退是发布动作按 RUNBOOK 执行。
+- **交付后修复轮（同日，P1/P2 可见性缺陷）**：① P1——`getSiteSettings()`/`getRecentLinks()` 原先原样吐 `site_settings.recent_links` JSON 快照，后台停用/软删/改名后首页「最近更新」仍显示旧条目旧文案；修复为共用私有 `filterRecentLinksByCurrent()`：按快照 ID 单查 `site_links`（`linkPublic()`）+ 分类 LEFT JOIN，保留快照原序、只留当前仍公开链接、字段一律取数据库当前值（孤儿 ID 剔除；纯净快照 10 条与主档当前值预检恒等 `missing=0 diff=0`，平价不受影响）。② P2——`getLinkDetail()`/`getLinkMirrors()` 补齐所属链接公开性自检（非公开 → null/[]，isGone 仍可见；此前仅靠详情页 `getLinkById` 兜底，仓库契约不完整）。③ 测试 `p8-visibility` 17→28（+11：draft/disabled/软删 × 详情/备链、状态翻转即时生效、最近更新停用/软删/改名/孤儿 ID/两入口恒等；补上此前未直测 `getLinkDetail(L_DET)` 的缺口）。④ 修复后全套门禁复跑：`npm run test:admin` 52 文件 / **915 用例全绿**、lint / `tsc --noEmit` / `npm run build` exit 0、静态冻结 20/20 + git diff 空、新构建 39 路径双渲染 **ALL_MATCH 39/39**。⑤ 实况突变对照（副本库 `facai8_p8_fix` + 独立实例 3114）：停用/软删下一次请求即从右栏消失、改名/分类改名显示现值、恢复即回原、停用链接详情 404→重发布 200，6/6 通过；副本库用后即删。生产仍未切换。

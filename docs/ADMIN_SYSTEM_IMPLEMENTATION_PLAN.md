@@ -259,7 +259,7 @@
 
 验收：/articles、/articles/[id]、/bulletin/[id] 回归 200；XSS payload 无法执行（`<script>`/`onclick`/`javascript:` 服务端剥离，预览即入库形态）。
 
-Gates：lint / typecheck / build 通过；`npm run test:admin` 34 文件 539 用例全绿（新增 `p6c-articles-api` 48、`p6c-bulletins-api` 38、`p6c-html-sanitizer` 40，真实 MySQL scratch 库 `facai8_p6c_test`）。
+Gates：lint / typecheck / build 通过；`npm run test:admin` 35 文件 558 用例全绿（`p6c-articles-api` 54、`p6c-bulletins-api` 40、`p6c-html-sanitizer` 41、`p6c-media-path` 10，真实 MySQL scratch 库 `facai8_p6c_test`；整改后复跑含 p6b 收紧断言仍全绿）。
 
 迁移 0004：`articles.id`、`bulletins.id` 转 BIGINT UNSIGNED AUTO_INCREMENT（雪花历史 ID 原样保留，无重建无清空）；开发库 `facai8_admin` 已应用，`docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql` 同步。
 
@@ -267,53 +267,74 @@ RBAC：复用既有 `articles.*`/`bulletins.*` 权限码——editor 不可发�
 
 静态冻结：`src/lib/facai8/data/` 20 文件与 P6B 基线提交逐字节一致（`git hash-object` 全比对）；前台页直接 import 静态模块，草稿永不泄漏到公开页。
 
+整改（验收反馈三问题，均已修复并补测试）：
+
+- [x] 问题 01 · 管理员端 DOM XSS（P1 安全）。`RichTextEditor` 挂载时把详情接口返回的库内原始 `contentHtml` 直接写入 `contentEditable`——历史未清洗正文（`onclick=`、`<script>` 等）会在编辑器内即时执行。修复：详情/列表 DTO 新增 `editorHtml` 字段（`dto/article.ts`、`dto/bulletin.ts`，Repository `to*Dto` 读路径内存净化 `sanitizeRichHtml(row.contentHtml)`，幂等、不改库、不批量重写存量）；`ArticleEditor`/`BulletinEditor` 的 `toForm`、`initialHtml`、保存后回灌、发布收敛同步四处一律消费 `editorHtml`；`contentHtml` 仍原样透出（前台渲染/审计对照）。`RichTextEditor` Props 写明「只接受服务端 Sanitizer 产物」安全契约。
+- [x] 问题 02 · 分类关联 TOCTOU（P1）。`createArticle` 的分类存在性检查在 `db.transaction` 之外，「检查通过 → 分类被并发软删除 → 照常插入」竞态（软删除不触发外键错误）；publish/restore 的分类检查是普通快照读。修复：`article-category-repository.ts` 新增 `lockArticleCategoryBriefForUpdate`（最小字段 + `SELECT ... FOR UPDATE`）；`assertCategoryUsable` 改为锁定读，create 的分类检查移入事务内，publish/restore 同改（要求分类 active 的发布闸门也在锁后判定）；锁序「先 articles 行后分类行」与既有约定一致，无反序死锁。测试：持锁事务实测阻塞并发 `UPDATE article_categories SET deleted_at`（锁释放前落地不可见）。
+- [x] 问题 03 · 媒体路径策略过宽（P1）。旧 `mediaPathSchema` 放行任意 `/` 开头路径（含未知后缀、`..`、查询串），`isSafeMediaSrc` 放行任意 http(s) 外链。修复：新建唯一策略源 `src/lib/admin/validation/media-path.ts`（isomorphic，客户端可 import）——站内 = 根前缀白名单（`/uploads/ /sites/ /images/ /videos/ /media/`）+ 已知图片/视频后缀 + 禁 `\`/控制字符/查询串/hash/`.`与`..`段/相对路径；站外 = 显式开关 `ALLOW_EXTERNAL_MEDIA = true`（策略明示：兼容 1 条历史绝对 Logo 与正文粘贴外链，仍过 `checkHttpUrl` 硬校验、服务端零远端抓取、前台 CSP 兜底）；`checkHttpUrl` 收敛至该模块（默认 label「地址」保持 p6b 文案不变）。`link-schema.mediaPathSchema`、封面/头像 schema、`html-sanitizer.isSafeMediaSrc`、`RichTextEditor.looksLikeSafeMediaSrc` 全部委托。文件存在性刻意不校验（快照引用未落盘的 `/uploads/**`，存在性盘点属 P6D 素材接入范围）。
+
+整改测试：`p6c-media-path.test.ts`（新增 10 用例）、`p6c-html-sanitizer.test.ts`（新增站内收紧用例）、`p6c-articles-api.test.ts`（新增 editorHtml 双字段/列表项、FOR UPDATE 阻塞并发软删除、封面 422 与历史形态放行 6 用例）、`p6c-bulletins-api.test.ts`（新增 editorHtml 2 用例）；既有 `p6b-links-schema.test.ts` 的 Logo 用例按新政策调整（裸 `/` 移入拒绝列表，新增站内未知后缀拒绝——原文件保留、其余断言不动）。
+
 > 开发库遗留（供验收复核）：`facai8_admin` 保留走查记录 `P6C走查_UI新建文章`（id `112450241390841857`，published v6，曾删除+恢复）与 `P6C走查_UI新建公告`（id `92981247277666305`，published v5，排序至 sort=0，曾删除+恢复）；走查引导账号 `smokeadmin` 密码已重置为 `P6c-Sm0ke-2026!`（`must_change_password=0`）；RBAC 补齐了早于 P6A 的种子所缺的 4 条 `article_categories.*` 权限及 4 角色映射（`INSERT IGNORE` 幂等补齐，与 `scripts/admin/seed-rbac.ts` 标准集一致）。
 
 ## P6D：广告、线路、设置
 
-- [ ] 广告位置、素材、目标 URL、时间窗口、排序、启停。
-- [ ] 线路名称、URL、排序、启停。
-- [ ] 站点名称、描述、Logo、favicon、页脚设置。
-- [ ] 白名单设置键，禁止任意环境配置写入。
-- [ ] 图片路径存在性校验。
+- [x] 广告位置、素材、目标 URL、时间窗口、排序、启停。（位置白名单当前仅 `home`（服务端 allowlist，新增位置只需扩枚举）；`/admin/ads` 列表 + 弹窗编辑器 `AdFormDialog`（A 基本信息 / B 投放设置 / C 状态三节）；`targetUrl` 完整 http(s) 硬校验（复用 `checkHttpUrl`），服务端**从不访问**目标地址（无 SSRF），预览只打开站内图片；`startsAt<endsAt` 成对校验，留空=立即生效/不限结束；状态机 draft→active、active↔disabled、expired→active/disabled（同状态 422），`effectiveStatus`（active+时间窗推导）仅展示不落库；新建恒为草稿；`POST /ads/reorder` 同位置作用域相邻交换，跨位置 409 `REORDER_SCOPE_MISMATCH`，逐行乐观锁单事务整批回滚）
+- [x] 线路名称、URL、排序、启停。（`/admin/lines` + `LineFormDialog`；新建恒为**停用**；状态只走 `PATCH /lines/[id]/status`（body 仅 `{status,version}`）；reorder 全局作用域（body 拒绝 position 字段）；URL 保存时仅格式校验、**不做可达性探测**（探测属前台既有能力））
+- [x] 站点名称、描述、Logo、favicon、页脚设置。（`/admin/settings` 四组卡片（基础信息/品牌/页脚/广告）+ 每组独立「保存本组」+「恢复默认值」（本地回填 SETTING_DEFAULTS=前台 SITE_INFO 口径，保存后生效）；无权限角色只读）
+- [x] 白名单设置键，禁止任意环境配置写入。（`GET/PATCH /settings` 仅允许 6 键：`site_name`、`site_description`、`site_logo`、`site_favicon`、`footer_text`、`ads_random`；未知键 422 `SETTINGS_UNKNOWN_KEY`；PATCH `{items:[{key,value,version}]}` 单事务全有或全无、逐行 `FOR UPDATE`（键名排序锁序）、version+1、同事务审计 `setting.update`）
+- [x] 图片路径存在性校验。（统一策略源 P6C 的 `media-path.ts` 之上新增服务端存在性解析 `src/lib/admin/security/media-file.ts`（server-only）：站内路径映射到 `public/` 磁盘校验，legacy `/uploads/...` 按 basename 映射 `public/sites/facai8/images/`（镜像前台冻结 asset() 口径）；广告 imagePath、settings logo/favicon 保存前均校验，缺文件 422（settings 为 `SETTINGS_MEDIA_MISSING`）；禁 SVG/HTML/外链）
 
-验收：首页广告、/lines、页面 metadata 和站点品牌字段回归。
+验收：首页广告、/lines、页面 metadata 和站点品牌字段回归 200（`CONTENT_SOURCE` 仍 static，前台读冻结快照，9 条前台路由全 200）；浏览器走查（smokeadmin/super_admin）覆盖广告 新建→启用→上移/下移→删除→回收站→恢复（状态与排序保留）、线路 新建默认停用→启用→上移→停用→删除→恢复、设置 逐组保存 v 递增、缺文件 422 内联报错、409 静默回取版本保留编辑、恢复默认值填入+提示。
 
-## P7：仪表盘、审计、导入
+Gates：lint / typecheck / build 通过；`npm run test:admin` 39 文件 684 用例全绿（新增 `p6d-ads-api`、`p6d-lines-api`、`p6d-settings-api`、`p6d-media-path` 与 `p6d-harness`，真实 MySQL scratch 库 `facai8_p6d_test`；无删除/放宽既有用例）。
 
-- [ ] 仪表盘仅展示真实统计。
-- [ ] 审计日志只读筛选。
-- [ ] 写操作记录 actor/action/resource/before/after/requestId/IP。
-- [ ] 日志脱敏。
-- [ ] 导入预检、差异展示、确认导入和历史记录。
-- [ ] 破坏性动作强制二次确认。
+迁移 0005：`ads.id`、`site_lines.id` 转 BIGINT UNSIGNED AUTO_INCREMENT（雪花/自增历史 ID 原样保留，DTO 一律字符串 id）；`site_settings.version` 乐观锁列已就位（懒初始化幂等 ODKU no-op，首次读取建行 version=1）；开发库 `facai8_admin` 已应用，`docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql` 同步。
 
-验收：所有 CRUD 有日志；失败事务不产生误导性的成功日志；导入记录完整。
+RBAC：复用 seed 既有 `ads.*`、`lines.*`、`settings.view`/`settings.update` 权限码——API 层强制，UI 按权限标志隐藏动作按钮（auditor 只读；editor 无 delete/restore 时列表不显示）。
 
-## P8：前台数据源切换（最后执行）
+静态冻结：`src/lib/facai8/data/` 20 文件与基线 blob 逐字节一致（`git rev-parse HEAD:<path>` vs `git hash-object` 20/20 相同）；`src/lib/facai8`、`public` git diff 为空；设置媒体解析、图片预览的 legacy 路径映射仅为**后台 UI 展示**服务，不反写前台静态数据。
+
+> 开发库遗留（供验收复核）：`facai8_admin` 保留走查记录 `P6D走查_UI新建广告`（active、sortOrder=14）与 `P6D走查_UI新建线路`（disabled、sortOrder=4）；`site_settings` 中 `footer_text` v3（默认值「搜你一切想搜」，曾外部改动+冲突回取）、`ads_random` v3（true）。开发环境注意：`.env` 未含 `ADMIN_CSRF_SECRET` 时 CSRF HMAC 密钥每进程随机（dev 回退），Turbopack 热重编译会导致刷新后写请求 403——本地走查需显式注入固定 dev 密钥。
+
+## P7：仪表盘、审计、导入（已完成，2026-11-12）
+
+- [x] 仪表盘仅展示真实统计（单条 `SELECT (subquery) as key` 聚合 COUNT，无 N+1、无虚构数字；每卡带口径标签；DB 不可用显示「数据库连接异常/统计暂不可用」，绝不显示 0；指标按会话权限过滤；「权限 46 项」为实时 COUNT 不再硬编码；最近导入按 id 倒序单行查询不再 count+offset）。
+- [x] 审计日志只读筛选（GET /api/admin/v1/audit-logs + /admin/audit-logs 页；全部过滤参数 zod 校验、sortBy 白名单 createdAt|id（默认 createdAt DESC, id DESC）、pageSize∈{20,50,100}；操作人 leftJoin 已删除显示「已删除管理员」不丢行；IP VARBINARY(16) 以 SQL `hex()` 读出并解码 IPv4/IPv6/IPv4-mapped，NULL 显示「—」；不存在编辑/删除/清账入口）。
+- [x] 写操作记录 actor/action/resource/before/after/requestId/IP（P3 writeAudit 契约延续；P6A–P6D 全部 CRUD 已接；P7 新增 import.execute 审计且成功审计在内容事务内——审计失败 → 内容回滚，杜绝误导性成功日志）。
+- [x] 日志脱敏（统一 redactor 写入前 + 读取后双保险：递归对象/数组，深度 16 / 列表 200 / 字符串 8192 上限，循环引用与超限打标记，脱敏异常 fail-closed 隐藏原值；密钥键名 pin/otp/auth 精确匹配 + authorization/session/signature 子串；自由文本 `api_key="x"` / `key=value` 形态一并遮蔽；详情页纯 `<pre>` 展示，无 innerHTML）。
+- [x] 导入预检、差异展示、确认导入和历史记录（复用 P4 核心 `static-import-core.ts` + 新差异引擎 `import-compare.ts`（13 表、missing/extra/changed/order_changed/relation_error 五类差异，列表上限 100 + truncated 标志）；预览零写入已测（runs/审计行数一字不变）；执行需预览回执 + 手输库名 + 命名锁；历史只读列表/详情/筛选/分页，CLI 行与已删发起人形态覆盖）。
+- [x] 破坏性动作强制二次确认（执行导入：服务端 preview 回执 snapshotVersion+checksum 不可被客户端覆盖(409) → confirmDatabase 手输与服务端库名精确匹配(422) → 生产环境额外 confirmProduction 勾选 + ADMIN_IMPORT_ALLOW_PRODUCTION=1 环境变量双因子(409) → MySQL GET_LOCK `facai8_import_<db>` 跨进程互斥(409 IMPORT_LOCKED)）。
+
+验收：48 测试文件 / 785 用例全绿（P7 新增 9 文件 101 用例，真实 MySQL scratch 库 `facai8_p7_test`；含 4182 行真实导入 → runs 行 started_by 为真实管理员 ID、重跑 no_op 引用 matched_run_id、GET_LOCK 占用 → 409 后锁即时释放）；lint/typecheck/build 全绿；浏览器走查 3 页零控制台错误（工作台真实统计+口径、操作日志筛选/详情脱敏 `<pre>`/`::1` IP 解码、数据导入预览差异明细/禁用执行/CLI 历史详情）；前台冻结：`src/lib/facai8/data/` git diff 为空，10 条前台路由 200。
+
+## P8：前台数据源切换（已完成，2026-11-12；生产切换动作属 P9 发布）
 
 ### 切换前门槛
-- [ ] P4 导入一致性通过。
-- [ ] P6 内容管理 CRUD 通过。
-- [ ] MySQL Repository 与静态 Repository 的 DTO 形状一致。
-- [ ] 已完成数据库和静态文件备份。
-- [ ] 已确认生产切换窗口。
+- [x] P4 导入一致性通过（对照库 `facai8_p8_test` 重放导入，checksum `251537562d…3e915f` 与快照一致）。
+- [x] P6 内容管理 CRUD 通过（P6A–P6D 既有 684 用例在 P8 全程未删未放宽）。
+- [x] MySQL Repository 与静态 Repository 的 DTO 形状一致（`p8-parity` 56 用例真实数据逐字段深比较）。
+- [ ] 已完成数据库和静态文件备份（切换窗口内执行，见 `docs/P8_ROLLBACK_RUNBOOK.md` §1；静态侧本就零改动）。
+- [ ] 已确认生产切换窗口（P9 发布时确认）。
 
-### 顺序
-1. 首页和分类读取。
-2. 网址详情。
-3. 文章列表/详情和公告。
-4. 标签和线路。
-5. 广告与站点设置。
+### 顺序（全部完成，每组后跑全套门禁 + 双渲染对比）
+1. [x] 首页和分类读取（ALL_MATCH 8/8）。
+2. [x] 网址详情（ALL_MATCH 14/14）。
+3. [x] 文章列表/详情和公告（ALL_MATCH 20/20）。
+4. [x] 标签和线路（ALL_MATCH 21/21）。
+5. [x] 广告与站点设置（ALL_MATCH 36/36）。
 
-每组变更后做字段、顺序、分页、SEO、空态、404、媒体路径对比。
+每组变更后做字段、顺序、分页、SEO、空态、404、媒体路径对比（最终固化为 39 路径双渲染回归集）。
 
 ### 验收
-- [ ] static 模式与切换前行为一致。
-- [ ] mysql 模式页面行为与静态基线一致。
-- [ ] MySQL 不可用时显示明确 5xx/错误，不静默读取旧静态值。
-- [ ] 切回 static 可在配置变更和重启后恢复。
-- [ ] 原始快照未删除。
+- [x] static 模式与切换前行为一致（20 个静态数据文件 SHA-256 冻结 20/20、受保护路径 git diff 为空、双渲染 static 侧即现行线上形状）。
+- [x] mysql 模式页面行为与静态基线一致（同一构建双模起服，39 路径归一化 DOM 逐字节 ALL_MATCH 39/39；P1/P2 可见性修复轮后新构建复跑仍 39/39）。
+- [x] 公开可见性契约自洽（links/articles/bulletins/ads + 详情/备链继承所属链接 + 首页「最近更新」按链接当前状态与当前字段值刷新，getSiteSettings/getRecentLinks 两入口恒等；停用/软删/改名在副本库实况 E2E 下一次请求即生效，6/6）。
+- [x] MySQL 不可用时显示明确 5xx/错误，不静默读取旧静态值（死库实况 E2E：11/11 路径 HTTP 500、响应无静态内容痕迹、`ContentSourceError` 固定消息含 32hex 请求编号并写服务端日志）。
+- [x] 切回 static 可在配置变更和重启后恢复（同一构建仅改 `CONTENT_SOURCE` + 重启即恢复 static，双渲染 3111/3112 双模互证；操作步骤固化在 RUNBOOK §2）。
+- [x] 原始快照未删除（`src/lib/facai8/data/` 原封不动，`scripts/p8-static-hash.mjs` 守卫）。
+
+验收：52 测试文件 / 915 用例全绿（P2–P7 既有 785 用例未删未放宽；P8 新增 `p8-rules` 38、`p8-parity` 56、`p8-visibility` 28（含交付后 P1/P2 修复轮 +11）、`p8-content-error` 8 共 4 文件 130 用例，真实 MySQL 对照库；修复轮后全套门禁复跑全绿）；lint/typecheck/build 全绿（前台全部路由动态 ƒ）；P8-7 去重以 `performance_schema` 采样取证（单请求 `site_settings` 恰 1 条 SELECT）；P8-8 浏览器实测 hydration 错误视图 + 请求编号↔日志 digest 关联。交付物：`docs/P8_FRONTEND_MIGRATION_REPORT.md`、`docs/P8_DATA_PARITY_REPORT.md`、`docs/P8_ROLLBACK_RUNBOOK.md`。生产未切换，默认仍 `CONTENT_SOURCE=static`。
 
 ## P9：安全、发布和运维
 

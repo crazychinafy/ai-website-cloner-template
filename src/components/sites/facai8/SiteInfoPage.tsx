@@ -1,9 +1,10 @@
-import { SITE_STATIC, type StaticField } from '@/lib/facai8/data/site-static'
+import type { StaticField } from '@/lib/facai8/data/site-static'
+import type { SitePageDto } from '@/lib/facai8/content/types'
 
 // 源站 SiteInfoPage-DKfpo35q.js 基座 1:1：.site-info-page（4 光斑 aurora + sip-hero 图标/标题/副标题/分隔线 + sip-card 正文）
 // 源站差异（本地等价）：源站客户端 GET /api/public/site-info/{field} → 骨架屏 → DOMPurify 净化 + 图片宽高注入；
-// 本地正文为静态存档（`site-static.ts`，与源站端点逐字节一致且 4 页均无 <img>）→ 直接 SSR 终态，
-// 无 loading/error/bootloader 分支（那些态依赖取数，本地不存在取数）。
+// P8-3（第 5 组）：正文由页面层从 repo.getSitePage(field) 取出后随 props 注入（旧 SITE_STATIC 值导入已废除），
+// 直接 SSR 终态，无 loading/error/bootloader 分支（那些态依赖取数，本地不存在取数）。
 // 图标 = 4 个源站 chunk 各自的 svg（24×24 stroke 2，逐属性复刻）。
 const ICONS: Record<StaticField, React.ReactNode> = {
   aboutUs: (
@@ -33,8 +34,8 @@ const ICONS: Record<StaticField, React.ReactNode> = {
   ),
 }
 
-export function SiteInfoPage({ field }: { field: StaticField }) {
-  const { title, subtitle, html } = SITE_STATIC[field]
+export function SiteInfoPage({ field, page }: { field: StaticField; page: SitePageDto }) {
+  const { title, subtitle, html } = page
   return (
     <div className="site-info-page">
       <div className="sip-aurora" aria-hidden="true">
