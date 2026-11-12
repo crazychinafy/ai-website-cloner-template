@@ -236,7 +236,8 @@ CREATE TABLE bulletins (
 ) ENGINE=InnoDB;
 
 CREATE TABLE ads (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6D migration 0005：id 已转 AUTO_INCREMENT（历史雪花 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   position VARCHAR(64) NOT NULL DEFAULT 'home',
   title VARCHAR(255) NOT NULL,
   target_url VARCHAR(2048) NOT NULL,
@@ -254,7 +255,8 @@ CREATE TABLE ads (
 ) ENGINE=InnoDB;
 
 CREATE TABLE site_lines (
-  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- P6D migration 0005：id 已转 AUTO_INCREMENT（历史雪花 id 保留，新行自增）
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   url VARCHAR(2048) NOT NULL,
   status ENUM('active','disabled') NOT NULL DEFAULT 'active',
@@ -293,6 +295,8 @@ CREATE TABLE site_pages (
 CREATE TABLE site_settings (
   setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
   setting_value JSON NOT NULL,
+  -- P6D migration 0005：新增 version 列（逐 key 乐观锁）
+  version INT UNSIGNED NOT NULL DEFAULT 1,
   updated_by BIGINT UNSIGNED NULL,
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_site_settings_updated_by FOREIGN KEY (updated_by) REFERENCES admin_users(id) ON DELETE SET NULL

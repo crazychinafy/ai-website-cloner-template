@@ -36,6 +36,13 @@
       "when": 1794399739039,
       "tag": "0004_p6c_articles_bulletins_autoincrement",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1794445121650,
+      "tag": "0005_p6d_ads_lines_settings",
+      "breakpoints": true
     }
   ]
 }

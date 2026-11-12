@@ -9,6 +9,7 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 import type { LinkStatus } from "@/lib/admin/dto/link"
+import type { AdDbStatus, AdEffectiveStatus } from "@/lib/admin/dto/ad"
 import { StatusBadge } from "../feedback/StatusBadge"
 
 /** iconfont class 预览；空值显示占位。iconClass 已由服务端 Zod 限制为安全 class token */
@@ -178,4 +179,73 @@ export function buildQuery(params: Record<string, string | number | boolean | un
 /** 时间展示（DATETIME(3) UTC 墙钟字符串，直接展示；空值占位） */
 export function formatTime(value: string | null | undefined): string {
   return value ? value : "—"
+}
+
+/**
+ * 站内媒体地址解析：legacy `/uploads/...` 路径按 basename 映射到本地静态素材目录
+ * （镜像前台冻结的 asset()：public/sites/facai8/images/{原文件名}，与服务端 media-file.ts 同一口径）。
+ * 其余站内路径原样返回。
+ */
+export function resolveMediaSrc(p: string | null | undefined): string | null {
+  if (!p) return null
+  const trimmed = p.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith("/uploads/")) {
+    const base = decodeURIComponent(trimmed.split("/").pop() || "")
+    if (!base) return null
+    return `/sites/facai8/images/${base}`
+  }
+  return trimmed
+}
+
+/**
+ * P6D：图片路径缩略预览（广告 imagePath / 站点 Logo / favicon）。
+ * 地址为站内静态路径；加载失败（文件缺失等）时自动隐藏为占位文案。
+ * 只加载站内资源，绝不访问广告目标 URL（§11.1 预览禁令）。
+ */
+export function MediaPreview({
+  src,
+  alt,
+  className,
+}: {
+  src: string
+  alt: string
+  className?: string
+}) {
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => setFailed(false), [src])
+  if (!src) return <span className={cn("text-xs text-muted-foreground/70", className)}>—</span>
+  if (failed) return <span className={cn("text-xs text-muted-foreground/70", className)}>预览不可用</span>
+  const resolved = resolveMediaSrc(src)
+  if (!resolved) return <span className={cn("text-xs text-muted-foreground/70", className)}>预览不可用</span>
+  return (
+    // 后台表单/列表即时预览：站内动态路径未配置 next/image remotePatterns → 用原生 <img>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={resolved}
+      alt={alt}
+      onError={() => setFailed(true)}
+      className={cn(
+        "inline-block h-10 w-16 rounded border border-border bg-muted/40 object-contain align-middle",
+        className,
+      )}
+    />
+  )
+}
+
+/** P6D：广告数据库状态徽章（draft/active/disabled/expired） */
+export function AdStatusPill({ status }: { status: AdDbStatus }) {
+  if (status === "active") return <StatusBadge tone="success">启用</StatusBadge>
+  if (status === "draft") return <StatusBadge tone="info">草稿</StatusBadge>
+  if (status === "expired") return <StatusBadge tone="warning">已过期</StatusBadge>
+  return <StatusBadge tone="neutral">停用</StatusBadge>
+}
+
+/** P6D：广告有效状态徽章（服务端按排期计算，仅展示，绝不回写 DB） */
+export function AdEffectivePill({ status }: { status: AdEffectiveStatus }) {
+  if (status === "active") return <StatusBadge tone="success">投放中</StatusBadge>
+  if (status === "scheduled") return <StatusBadge tone="info">待投放</StatusBadge>
+  if (status === "expired") return <StatusBadge tone="warning">已过期</StatusBadge>
+  if (status === "disabled") return <StatusBadge tone="neutral">已停用</StatusBadge>
+  return <StatusBadge tone="neutral">草稿</StatusBadge>
 }

@@ -279,13 +279,23 @@ RBAC：复用既有 `articles.*`/`bulletins.*` 权限码——editor 不可发�
 
 ## P6D：广告、线路、设置
 
-- [ ] 广告位置、素材、目标 URL、时间窗口、排序、启停。
-- [ ] 线路名称、URL、排序、启停。
-- [ ] 站点名称、描述、Logo、favicon、页脚设置。
-- [ ] 白名单设置键，禁止任意环境配置写入。
-- [ ] 图片路径存在性校验。
+- [x] 广告位置、素材、目标 URL、时间窗口、排序、启停。（位置白名单当前仅 `home`（服务端 allowlist，新增位置只需扩枚举）；`/admin/ads` 列表 + 弹窗编辑器 `AdFormDialog`（A 基本信息 / B 投放设置 / C 状态三节）；`targetUrl` 完整 http(s) 硬校验（复用 `checkHttpUrl`），服务端**从不访问**目标地址（无 SSRF），预览只打开站内图片；`startsAt<endsAt` 成对校验，留空=立即生效/不限结束；状态机 draft→active、active↔disabled、expired→active/disabled（同状态 422），`effectiveStatus`（active+时间窗推导）仅展示不落库；新建恒为草稿；`POST /ads/reorder` 同位置作用域相邻交换，跨位置 409 `REORDER_SCOPE_MISMATCH`，逐行乐观锁单事务整批回滚）
+- [x] 线路名称、URL、排序、启停。（`/admin/lines` + `LineFormDialog`；新建恒为**停用**；状态只走 `PATCH /lines/[id]/status`（body 仅 `{status,version}`）；reorder 全局作用域（body 拒绝 position 字段）；URL 保存时仅格式校验、**不做可达性探测**（探测属前台既有能力））
+- [x] 站点名称、描述、Logo、favicon、页脚设置。（`/admin/settings` 四组卡片（基础信息/品牌/页脚/广告）+ 每组独立「保存本组」+「恢复默认值」（本地回填 SETTING_DEFAULTS=前台 SITE_INFO 口径，保存后生效）；无权限角色只读）
+- [x] 白名单设置键，禁止任意环境配置写入。（`GET/PATCH /settings` 仅允许 6 键：`site_name`、`site_description`、`site_logo`、`site_favicon`、`footer_text`、`ads_random`；未知键 422 `SETTINGS_UNKNOWN_KEY`；PATCH `{items:[{key,value,version}]}` 单事务全有或全无、逐行 `FOR UPDATE`（键名排序锁序）、version+1、同事务审计 `setting.update`）
+- [x] 图片路径存在性校验。（统一策略源 P6C 的 `media-path.ts` 之上新增服务端存在性解析 `src/lib/admin/security/media-file.ts`（server-only）：站内路径映射到 `public/` 磁盘校验，legacy `/uploads/...` 按 basename 映射 `public/sites/facai8/images/`（镜像前台冻结 asset() 口径）；广告 imagePath、settings logo/favicon 保存前均校验，缺文件 422（settings 为 `SETTINGS_MEDIA_MISSING`）；禁 SVG/HTML/外链）
 
-验收：首页广告、/lines、页面 metadata 和站点品牌字段回归。
+验收：首页广告、/lines、页面 metadata 和站点品牌字段回归 200（`CONTENT_SOURCE` 仍 static，前台读冻结快照，9 条前台路由全 200）；浏览器走查（smokeadmin/super_admin）覆盖广告 新建→启用→上移/下移→删除→回收站→恢复（状态与排序保留）、线路 新建默认停用→启用→上移→停用→删除→恢复、设置 逐组保存 v 递增、缺文件 422 内联报错、409 静默回取版本保留编辑、恢复默认值填入+提示。
+
+Gates：lint / typecheck / build 通过；`npm run test:admin` 39 文件 684 用例全绿（新增 `p6d-ads-api`、`p6d-lines-api`、`p6d-settings-api`、`p6d-media-path` 与 `p6d-harness`，真实 MySQL scratch 库 `facai8_p6d_test`；无删除/放宽既有用例）。
+
+迁移 0005：`ads.id`、`site_lines.id` 转 BIGINT UNSIGNED AUTO_INCREMENT（雪花/自增历史 ID 原样保留，DTO 一律字符串 id）；`site_settings.version` 乐观锁列已就位（懒初始化幂等 ODKU no-op，首次读取建行 version=1）；开发库 `facai8_admin` 已应用，`docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql` 同步。
+
+RBAC：复用 seed 既有 `ads.*`、`lines.*`、`settings.view`/`settings.update` 权限码——API 层强制，UI 按权限标志隐藏动作按钮（auditor 只读；editor 无 delete/restore 时列表不显示）。
+
+静态冻结：`src/lib/facai8/data/` 20 文件与基线 blob 逐字节一致（`git rev-parse HEAD:<path>` vs `git hash-object` 20/20 相同）；`src/lib/facai8`、`public` git diff 为空；设置媒体解析、图片预览的 legacy 路径映射仅为**后台 UI 展示**服务，不反写前台静态数据。
+
+> 开发库遗留（供验收复核）：`facai8_admin` 保留走查记录 `P6D走查_UI新建广告`（active、sortOrder=14）与 `P6D走查_UI新建线路`（disabled、sortOrder=4）；`site_settings` 中 `footer_text` v3（默认值「搜你一切想搜」，曾外部改动+冲突回取）、`ads_random` v3（true）。开发环境注意：`.env` 未含 `ADMIN_CSRF_SECRET` 时 CSRF HMAC 密钥每进程随机（dev 回退），Turbopack 热重编译会导致刷新后写请求 403——本地走查需显式注入固定 dev 密钥。
 
 ## P7：仪表盘、审计、导入
 

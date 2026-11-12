@@ -272,3 +272,16 @@
 ## 14. 明确未包含的风险承诺
 
 本文件是工程安全要求，不代表已经完成安全审计或渗透测试。未执行的测试不得标记通过。正式公网开放前建议进行独立安全审查。
+
+## 15. P6D 实施与测试执行记录（2026-11-12）
+
+P6D（广告 / 线路 / 站点设置）已按下述规范实施并通过测试：
+
+- **RBAC**：复用 seed 既有权限码 `ads.view/create/update/delete`、`lines.*`、`settings.view/settings.update`；全部在 API Handler 层强制（403 无副作用、不写审计）；UI 按权限标志隐藏对应动作。auditor 三角色只读实测通过。
+- **CSRF / Origin**：沿用 P3 组合防护；P6D 全部写路由（POST/PATCH/DELETE）实测携带 `X-CSRF-Token` 通过。开发环境注意：`ADMIN_CSRF_SECRET` 缺省时按进程随机回退，Turbopack 热重编译会轮换密钥导致刷新后写请求 403（生产必须显式配置，已在 env 校验中 fail-closed）。
+- **SSRF 防护**：广告 `targetUrl` 与线路 `url` 仅做完整 http(s) 格式校验（禁 `javascript:`/`data:`/`file:` 等），服务端与后台 UI 均不发起对目标地址的抓取；UI 预览只打开站内图片路径。
+- **媒体路径安全**：广告 imagePath、settings `site_logo`/`site_favicon` 走统一媒体策略（根前缀白名单 + 已知图片后缀 + 禁 SVG/HTML/查询串/外链）并叠加服务端磁盘存在性校验（`src/lib/admin/security/media-file.ts`，server-only；legacy `/uploads/...` 按 basename 映射 `public/sites/facai8/images/`，与前台冻结 asset() 同口径）；缺文件 422。
+- **审计**：`ad.*`、`line.*`（create/update/status/reorder/soft_delete/restore）与 `setting.update` 均在写事务内落库；403/409/422 不产生日志；跳转 URL 编辑仅记摘要/长度/哈希（`url-audit.ts`）。
+- **并发保护**：所有 P6D 写路径逐行 `version` 乐观锁（409 统一文案），reorder/settings 批量为单事务整批回滚；settings 按键名排序 `FOR UPDATE` 锁行，实测外部抢先保存触发 UI 409 静默回取版本。
+- **测试**：`npm run test:admin` = vitest 39 文件 / 684 用例全绿（真实 MySQL scratch 库 `facai8_p6d_test`）；P6D 新增 `p6d-ads-api`、`p6d-lines-api`、`p6d-settings-api`、`p6d-media-path` 4 个测试文件（+ `p6d-harness` 夹具）；未删除或放宽任何既有用例。lint / typecheck / build 全部通过。
+- **前台冻结回归**：`src/lib/facai8/data/` 20 文件 blob 与基线 20/20 逐字节一致；`src/lib/facai8`、`public` git diff 为空；`CONTENT_SOURCE=static` 下 9 条前台路由（/、/lines、/articles、文章详情、公告详情、/about、/agreement、/disclaimer、/privacy）全部 200。

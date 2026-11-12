@@ -49,6 +49,13 @@ export type AdminErrorCode =
   | "ARTICLE_RESTORE_BLOCKED"
   | "BULLETIN_NOT_FOUND"
   | "BULLETIN_STATUS_TRANSITION"
+  // P6D：广告/线路/站点设置业务错误码（投放状态机 + 媒体文件存在性 + 逐 key 乐观锁）
+  | "AD_NOT_FOUND"
+  | "AD_STATUS_TRANSITION"
+  | "LINE_NOT_FOUND"
+  | "LINE_STATUS_TRANSITION"
+  | "SETTINGS_KEY_UNKNOWN"
+  | "SETTINGS_MEDIA_MISSING"
 
 export function ok(data: unknown, init?: { status?: number; headers?: Record<string, string> }): Response {
   return Response.json(

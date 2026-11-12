@@ -382,11 +382,11 @@
 - site_link_mirrors：备用链接。
 - articles：文章。
 - bulletins：公告。
-- ads：广告。
-- site_lines：线路。
+- ads：广告。（P6D：migration 0005 将 `id` 转 BIGINT UNSIGNED AUTO_INCREMENT，历史 ID 原样保留，DTO id 为字符串）
+- site_lines：线路。（P6D：同上，`id` 自增化）
 - icon_libraries：图标字体库元数据。
 - site_pages：可选的关于/协议/免责声明/隐私页面内容管理。
-- site_settings：站点键值设置。
+- site_settings：站点键值设置。（P6D：`version` 乐观锁列启用，写入仅允许 6 键白名单）
 - media_assets：上传文件元数据。
 - admin_audit_logs：操作审计。
 - admin_import_runs：快照导入记录。
@@ -443,7 +443,7 @@
 
 建议状态码：
 - 200：读取/更新成功
-- 201：创建成功
+- 200：读取/更新/创建成功（全站实现均用 200 + DTO，未使用 201；P6D 沿用）
 - 204：无响应体删除/注销成功
 - 400：参数错误
 - 401：未登录
@@ -469,10 +469,18 @@
 | GET/PATCH/DELETE | /api/admin/v1/articles/[id] | 文章修改/软删除 |
 | GET/POST | /api/admin/v1/article-categories | 文章分类 |
 | GET/POST | /api/admin/v1/bulletins | 公告 |
-| GET/POST | /api/admin/v1/ads | 广告 |
+| GET/POST | /api/admin/v1/ads | 广告（P6D 已实现：GET 列表支持 position/status/includeDeleted/关键词，POST 新建恒为草稿） |
+| GET/PATCH/DELETE | /api/admin/v1/ads/[id] | 广告详情/更新（乐观锁）/软删除（`?version=`）（P6D） |
+| PATCH | /api/admin/v1/ads/[id]/status | 广告启停 draft→active、active↔disabled、expired→active/disabled（P6D） |
+| POST | /api/admin/v1/ads/[id]/restore | 广告恢复（保留原状态与排序）（P6D） |
+| POST | /api/admin/v1/ads/reorder | 广告排序（同 position 作用域，跨位置 409 REORDER_SCOPE_MISMATCH）（P6D） |
 | GET/POST | /api/admin/v1/tags | 标签 |
-| GET/POST | /api/admin/v1/lines | 线路 |
-| GET/PATCH | /api/admin/v1/settings | 站点设置 |
+| GET/POST | /api/admin/v1/lines | 线路（P6D 已实现：POST 新建恒为停用） |
+| GET/PATCH/DELETE | /api/admin/v1/lines/[id] | 线路详情/更新（不含 status）/软删除（P6D） |
+| PATCH | /api/admin/v1/lines/[id]/status | 线路启停 active↔disabled（状态唯一入口）（P6D） |
+| POST | /api/admin/v1/lines/[id]/restore | 线路恢复（保留原状态与排序）（P6D） |
+| POST | /api/admin/v1/lines/reorder | 线路排序（全局作用域，body 拒绝 position）（P6D） |
+| GET/PATCH | /api/admin/v1/settings | 站点设置（P6D 已实现：GET `{settings:{key:{value,version}}}`；PATCH `{items:[{key,value,version}]}` 单事务全有或全无） |
 | GET | /api/admin/v1/audit-logs | 审计查询 |
 | POST | /api/admin/v1/imports/preview | 导入预检 |
 | POST | /api/admin/v1/imports | 执行导入 |
@@ -520,12 +528,37 @@
 - 发布/撤回动作必须写审计日志。
 - 文章浏览量只允许服务端受控递增，不接受客户端任意写入。
 
-### 9.4 广告
+### 9.4 广告（P6D 已实施）
 
 - 保存位置、标题、图片、目标 URL、排序、状态、开始和结束时间。
-- 前台读取时按 position、status、时间窗口和 sort_order 过滤。
-- 不在管理端预览时自动访问广告目标地址。
+- 位置 allowlist：当前仅 `home`（首页）；服务端枚举校验，未知位置 422。
+- DB 状态机（`status` 列）：`draft`/`active`/`disabled`/`expired` 四态——新建恒为 `draft`；启停只走 `PATCH [id]/status`：draft→active、active↔disabled、expired→active/disabled，同状态请求 422。
+- `effectiveStatus` 为 DTO 只读推导字段（status=active 且落在 startsAt/endsAt 时间窗内才为 active，到期 active 展示 expired），不落库、不参与写校验。
+- 投放时间：`startsAt < endsAt` 成对校验；留空分别表示立即生效（启用后）与不限结束。
+- 图片路径：站内路径（`/` 开头），复用统一媒体策略（根前缀白名单 + 已知图片后缀 + 禁 SVG/HTML/查询串/外链）且**服务端做磁盘存在性校验**（`src/lib/admin/security/media-file.ts`，server-only）；legacy `/uploads/...` 按 basename 映射 `public/sites/facai8/images/`（镜像前台冻结 asset() 口径）；缺文件 422。
+- 不在管理端预览时自动访问广告目标地址：`targetUrl` 仅做完整 http(s) 格式硬校验（禁 `javascript:`/`data:` 等），服务端零远端抓取（无 SSRF）；UI 预览只打开站内图片。
+- 排序：`POST /ads/reorder` 限定同 position 作用域，跨位置混批 409 `REORDER_SCOPE_MISMATCH`；逐行 version 乐观锁，单事务整批回滚。
+- 删除/恢复：`deleted_at` 软删除；恢复保留原状态、排期与排序值。
+- 前台读取时按 position、status、时间窗口和 sort_order 过滤（P8 前前台仍读静态快照）。
 - 广告的合法性、素材授权和展示地区限制由运营方确认。
+
+### 9.5 线路（P6D 已实施）
+
+- 字段：name、url、status、sort_order、version、deleted_at。
+- 新建恒为 `disabled`（防止未经核验的线路直接对外）。
+- 状态只走 `PATCH /lines/[id]/status`（active↔disabled）；通用 PATCH 不接受 status 字段。
+- URL 仅格式校验（完整 http(s)，复用 checkHttpUrl），保存时**不做可达性探测**——可达性检测属前台既有能力。
+- 排序为全局作用域（无 position 维度）；reorder body 出现 position 字段即 422。
+- 软删除/恢复保留原状态与 sortOrder；回收站 = `includeDeleted=true` 筛选。
+
+### 9.6 站点设置（P6D 已实施）
+
+- 键白名单（6 个）：`site_name`、`site_description`、`site_logo`、`site_favicon`、`footer_text`、`ads_random`；未知键 422 `SETTINGS_UNKNOWN_KEY`，禁止任意键/环境配置写入。
+- 值按类型校验：文本长度限制、媒体键走统一媒体策略 + 磁盘存在性（缺文件 422 `SETTINGS_MEDIA_MISSING`）、`ads_random` 仅布尔。
+- `GET /settings` 返回 `{settings:{key:{value,version}}}`；行缺失时懒初始化（幂等 ODKU no-op，version=1）。
+- `PATCH /settings`：`{items:[{key,value,version}]}` 单事务全有或全无——按 key 排序后逐行 `FOR UPDATE` 锁行防死锁，version 不符 409（消息与全站乐观锁文案一致），成功逐键 version+1，同事务写 `setting.update` 审计。
+- 历史遗留双编码 JSON 值读取时仅当再解析结果为 string 才解包；写回一律干净 JSON。
+- 媒体键（logo/favicon）UI 提供站内缩略预览（legacy `/uploads/` 路径映射口径与广告一致）。
 
 ## 10. 事务、并发与缓存
 
