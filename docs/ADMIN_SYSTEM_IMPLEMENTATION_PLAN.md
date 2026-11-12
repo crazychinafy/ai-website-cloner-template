@@ -308,30 +308,32 @@ RBAC：复用 seed 既有 `ads.*`、`lines.*`、`settings.view`/`settings.update
 
 验收：48 测试文件 / 785 用例全绿（P7 新增 9 文件 101 用例，真实 MySQL scratch 库 `facai8_p7_test`；含 4182 行真实导入 → runs 行 started_by 为真实管理员 ID、重跑 no_op 引用 matched_run_id、GET_LOCK 占用 → 409 后锁即时释放）；lint/typecheck/build 全绿；浏览器走查 3 页零控制台错误（工作台真实统计+口径、操作日志筛选/详情脱敏 `<pre>`/`::1` IP 解码、数据导入预览差异明细/禁用执行/CLI 历史详情）；前台冻结：`src/lib/facai8/data/` git diff 为空，10 条前台路由 200。
 
-## P8：前台数据源切换（最后执行）
+## P8：前台数据源切换（已完成，2026-11-12；生产切换动作属 P9 发布）
 
 ### 切换前门槛
-- [ ] P4 导入一致性通过。
-- [ ] P6 内容管理 CRUD 通过。
-- [ ] MySQL Repository 与静态 Repository 的 DTO 形状一致。
-- [ ] 已完成数据库和静态文件备份。
-- [ ] 已确认生产切换窗口。
+- [x] P4 导入一致性通过（对照库 `facai8_p8_test` 重放导入，checksum `251537562d…3e915f` 与快照一致）。
+- [x] P6 内容管理 CRUD 通过（P6A–P6D 既有 684 用例在 P8 全程未删未放宽）。
+- [x] MySQL Repository 与静态 Repository 的 DTO 形状一致（`p8-parity` 56 用例真实数据逐字段深比较）。
+- [ ] 已完成数据库和静态文件备份（切换窗口内执行，见 `docs/P8_ROLLBACK_RUNBOOK.md` §1；静态侧本就零改动）。
+- [ ] 已确认生产切换窗口（P9 发布时确认）。
 
-### 顺序
-1. 首页和分类读取。
-2. 网址详情。
-3. 文章列表/详情和公告。
-4. 标签和线路。
-5. 广告与站点设置。
+### 顺序（全部完成，每组后跑全套门禁 + 双渲染对比）
+1. [x] 首页和分类读取（ALL_MATCH 8/8）。
+2. [x] 网址详情（ALL_MATCH 14/14）。
+3. [x] 文章列表/详情和公告（ALL_MATCH 20/20）。
+4. [x] 标签和线路（ALL_MATCH 21/21）。
+5. [x] 广告与站点设置（ALL_MATCH 36/36）。
 
-每组变更后做字段、顺序、分页、SEO、空态、404、媒体路径对比。
+每组变更后做字段、顺序、分页、SEO、空态、404、媒体路径对比（最终固化为 39 路径双渲染回归集）。
 
 ### 验收
-- [ ] static 模式与切换前行为一致。
-- [ ] mysql 模式页面行为与静态基线一致。
-- [ ] MySQL 不可用时显示明确 5xx/错误，不静默读取旧静态值。
-- [ ] 切回 static 可在配置变更和重启后恢复。
-- [ ] 原始快照未删除。
+- [x] static 模式与切换前行为一致（20 个静态数据文件 SHA-256 冻结 20/20、受保护路径 git diff 为空、双渲染 static 侧即现行线上形状）。
+- [x] mysql 模式页面行为与静态基线一致（同一构建双模起服，39 路径归一化 DOM 逐字节 ALL_MATCH 39/39）。
+- [x] MySQL 不可用时显示明确 5xx/错误，不静默读取旧静态值（死库实况 E2E：11/11 路径 HTTP 500、响应无静态内容痕迹、`ContentSourceError` 固定消息含 32hex 请求编号并写服务端日志）。
+- [x] 切回 static 可在配置变更和重启后恢复（同一构建仅改 `CONTENT_SOURCE` + 重启即恢复 static，双渲染 3111/3112 双模互证；操作步骤固化在 RUNBOOK §2）。
+- [x] 原始快照未删除（`src/lib/facai8/data/` 原封不动，`scripts/p8-static-hash.mjs` 守卫）。
+
+验收：52 测试文件 / 904 用例全绿（P2–P7 既有 785 用例未删未放宽；P8 新增 `p8-rules` 38、`p8-parity` 56、`p8-visibility` 17、`p8-content-error` 8 共 4 文件 119 用例，真实 MySQL 对照库）；lint/typecheck/build 全绿（前台全部路由动态 ƒ）；P8-7 去重以 `performance_schema` 采样取证（单请求 `site_settings` 恰 1 条 SELECT）；P8-8 浏览器实测 hydration 错误视图 + 请求编号↔日志 digest 关联。交付物：`docs/P8_FRONTEND_MIGRATION_REPORT.md`、`docs/P8_DATA_PARITY_REPORT.md`、`docs/P8_ROLLBACK_RUNBOOK.md`。生产未切换，默认仍 `CONTENT_SOURCE=static`。
 
 ## P9：安全、发布和运维
 

@@ -1,13 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
-import type { CatNode } from '@/lib/facai8/data/categories'
-import type { LinkItem } from '@/lib/facai8/data/links'
+import type { CatNodeDto, LinkItemDto, TagDto } from '@/lib/facai8/content/types'
 import { LinkCard, SkeletonCard } from './LinkCard'
 
 export interface CatSectionData {
-  cat: CatNode
-  own: LinkItem[]
-  bySub: Record<string, LinkItem[]>
+  cat: CatNodeDto
+  own: LinkItemDto[]
+  bySub: Record<string, LinkItemDto[]>
 }
 
 interface Props {
@@ -16,10 +15,11 @@ interface Props {
   activeSubId: string | null
   onTab: (catId: string, subId: string) => void
   innerRef: (el: HTMLElement | null) => void
+  tagsById: Record<string, TagDto>
 }
 
 // 首页分类区块：头部（图标+标题+子分类 tab）+ 卡片网格；折叠态 = 408px 占位
-export function CatSection({ data, expanded, activeSubId, onTab, innerRef }: Props) {
+export function CatSection({ data, expanded, activeSubId, onTab, innerRef, tagsById }: Props) {
   const { cat } = data
   const hasKids = cat.children.length > 0
   const visible = hasKids ? (activeSubId ? data.bySub[activeSubId] : []) : data.own
@@ -55,7 +55,7 @@ export function CatSection({ data, expanded, activeSubId, onTab, innerRef }: Pro
         )}
       </div>
       {expanded ? (
-        <CatGrid key={activeSubId ?? 'own'} visible={visible} />
+        <CatGrid key={activeSubId ?? 'own'} visible={visible} tagsById={tagsById} />
       ) : (
         <div style={{ minHeight: 408 }}></div>
       )}
@@ -64,7 +64,7 @@ export function CatSection({ data, expanded, activeSubId, onTab, innerRef }: Pro
 }
 
 // 卡片网格（key 变化即重挂载 → 重播 源站展开/切 tab 动画序列：骨架→淡入→加 swapped）
-function CatGrid({ visible }: { visible: LinkItem[] }) {
+function CatGrid({ visible, tagsById }: { visible: LinkItemDto[]; tagsById: Record<string, TagDto> }) {
   const [phase, setPhase] = useState<'skeleton' | 'ready'>('skeleton')
   const [swapped, setSwapped] = useState(false)
   const [switching, setSwitching] = useState(true)
@@ -87,7 +87,7 @@ function CatGrid({ visible }: { visible: LinkItem[] }) {
     <div className={gridCls}>
       {phase === 'skeleton'
         ? Array.from({ length: Math.min(8, Math.max(4, visible.length)) }, (_, i) => <SkeletonCard key={i} />)
-        : visible.map((l) => <LinkCard key={l.id} l={l} />)}
+        : visible.map((l) => <LinkCard key={l.id} l={l} tagsById={tagsById} />)}
     </div>
   )
 }

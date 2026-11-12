@@ -27,7 +27,27 @@ describe("migration 行为", () => {
   it("空库初始化成功：23 张表 + __drizzle_migrations 跟踪表", async () => {
     await runMigrations(pool)
     expect(await count("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = ?", "facai8_p2_test")).toBe(24)
-    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(6) // P6D：0000-0005
+    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(8) // P8：0000-0007
+    // P8-0（0006）：site_links.tag_sort_order 列 + 标签网格排序索引必须随空库初始化就位
+    expect(
+      await count(
+        "SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = ? AND table_name = 'site_links' AND column_name = 'tag_sort_order'",
+        "facai8_p2_test",
+      ),
+    ).toBe(1)
+    // P8（0007）：site_links.archive_sort_order 列（首页分组/搜索候选的源档案序）必须就位
+    expect(
+      await count(
+        "SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = ? AND table_name = 'site_links' AND column_name = 'archive_sort_order'",
+        "facai8_p2_test",
+      ),
+    ).toBe(1)
+    expect(
+      await count(
+        "SELECT COUNT(*) AS n FROM information_schema.statistics WHERE table_schema = ? AND table_name = 'site_links' AND index_name = 'idx_site_links_tag_sort'",
+        "facai8_p2_test",
+      ),
+    ).toBe(5) // information_schema.statistics 每索引列一行（tag_id,status,deleted_at,tag_sort_order,id）
     const db = makeDb(pool)
     const links = await db.select({ id: schema.siteLinks.id }).from(schema.siteLinks)
     expect(links).toHaveLength(0)
@@ -44,7 +64,7 @@ describe("migration 行为", () => {
 
     await runMigrations(pool) // 第二次执行
     expect(await count("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = ?", "facai8_p2_test")).toBe(24)
-    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(6)
+    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(8)
     // 数据仍在
     expect(await count("SELECT COUNT(*) AS n FROM site_tags")).toBe(1)
     expect(await count("SELECT COUNT(*) AS n FROM link_categories")).toBe(2)
@@ -55,7 +75,7 @@ describe("migration 行为", () => {
   it("第三次执行仍然幂等", async () => {
     await runMigrations(pool)
     expect(await count("SELECT COUNT(*) AS n FROM site_tags")).toBe(1)
-    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(6)
+    expect(await count("SELECT COUNT(*) AS n FROM __drizzle_migrations")).toBe(8)
   })
 
   // P6B：0003 把 site_links.id 切成 AUTO_INCREMENT（保留快照显式 ID 的能力）

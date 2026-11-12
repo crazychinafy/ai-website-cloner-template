@@ -163,6 +163,28 @@ export interface SiteSettingsDto {
   recentLinks: MiniLinkDto[]
 }
 
+/** 搜索结果集（P8-1 服务端上限截断；truncated=true → items 只是 total 条命中中的前 items.length 条） */
+export interface SearchResults<T> {
+  items: T[]
+  /** 命中总数（截断前） */
+  total: number
+  truncated: boolean
+}
+
+/** 搜索命中链接（= util.SearchLinkResult 原形：LinkItem 全字段 + categoryName，供搜索结果卡片直接消费） */
+export interface SearchLinkDto extends LinkItemDto {
+  categoryName: string
+}
+
+/** 搜索命中文章（= util.SearchArticleResult 原形；description 源站快照优先、缺失回退 articleExcerpt，不含正文） */
+export interface SearchArticleDto {
+  id: string
+  title: string
+  categoryName: string
+  description: string
+  createdAt: string
+}
+
 /** 站点设置键（site_settings.setting_key 合法值） */
 export const SITE_SETTING_KEYS = [
   "site_name",

@@ -1,20 +1,21 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { HOME_POPUP } from '@/lib/facai8/data/popup'
+import type { SiteSettingsDto } from '@/lib/facai8/content/types'
 
 const HALO = '/sites/facai8/images/popup-halo.png'
 
 // 首屏「重要通知」弹窗（源站结构：mask > wrap > halo(sprite) + card(head/content/foot/agreement)）
-export function HomePopup() {
+// P8-4：弹窗文案由服务端（页面 → 仓库 settings.popup）注入。
+export function HomePopup({ popup }: { popup: SiteSettingsDto['popup'] }) {
   const [open, setOpen] = useState(false)
   const [shown, setShown] = useState(false)
 
   useEffect(() => {
-    if (!HOME_POPUP.enabled) return
+    if (!popup.enabled) return
     const t = setTimeout(() => setShown(true), 350)
     return () => clearTimeout(t)
-  }, [])
+  }, [popup.enabled])
 
   useEffect(() => {
     if (open) document.body.classList.add('popup-open')
@@ -22,7 +23,7 @@ export function HomePopup() {
     return () => document.body.classList.remove('popup-open')
   }, [open])
 
-  if (!shown || !open || !HOME_POPUP.enabled) return null
+  if (!shown || !open || !popup.enabled) return null
 
   return (
     <div className="home-popup-mask">
@@ -39,7 +40,7 @@ export function HomePopup() {
             <span className="home-popup-spark">✦</span>
             <div>
               <div className="home-popup-icon">📢</div>
-              <div>{HOME_POPUP.title}</div>
+              <div>{popup.title}</div>
               <button type="button" className="home-popup-close" onClick={() => setOpen(false)} aria-label="关闭">
                 ✕
               </button>
@@ -47,7 +48,7 @@ export function HomePopup() {
           </div>
           <div
             className="article-detail-content home-popup-content"
-            dangerouslySetInnerHTML={{ __html: HOME_POPUP.content }}
+            dangerouslySetInnerHTML={{ __html: popup.content }}
           />
           <div className="home-popup-foot">
             <label className="home-popup-notoday">

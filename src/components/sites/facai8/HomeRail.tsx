@@ -1,11 +1,16 @@
 import Link from 'next/link'
-import { STATS } from '@/lib/facai8/data/stats'
-import { NEW_LINKS } from '@/lib/facai8/data/new-links'
-import { NEW_ARTICLES } from '@/lib/facai8/data/new-articles'
-import { RECENT_LINKS } from '@/lib/facai8/data/recent-links'
+import type { MiniArticleDto, MiniLinkDto, SiteSettingsDto } from '@/lib/facai8/content/types'
 import { asset, firstChar, fmtK, gstaticFavicon } from '@/lib/facai8/util'
 import { HomeSearchBox } from './HomeSearchBox'
 import { ContactsWidget } from './ContactsWidget'
+
+// P8-4：统计 / 最新收录 / 最新文章 / 最近更新数据由服务端（页面 → 仓库）注入。
+interface Props {
+  stats: SiteSettingsDto['stats']
+  newLinks: MiniLinkDto[]
+  newArticles: MiniArticleDto[]
+  recentLinks: MiniLinkDto[]
+}
 
 const RefreshIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -28,12 +33,12 @@ function RailCard({ title, children }: { title: string; children: React.ReactNod
 }
 
 // 首页右栏（240px）：搜索 / 统计 / 线路检测 / 联系我们 / 最新收录 / 最新文章 / 最近更新
-export function HomeRail() {
+export function HomeRail({ stats, newLinks, newArticles, recentLinks }: Props) {
   const tiles = [
-    { icon: '🌐', num: fmtK(STATS.links), label: '收录网址', sc: '#1e80ff', bg: 'rgb(232, 243, 255)' },
-    { icon: '📝', num: fmtK(STATS.articles), label: '收录文章', sc: '#2f8bff', bg: 'rgb(234, 244, 255)' },
-    { icon: '💬', num: fmtK(STATS.comments), label: '评论总数', sc: '#f59e0b', bg: 'rgb(255, 251, 235)' },
-    { icon: '👁️', num: fmtK(STATS.totalViews), label: '总浏览', sc: '#10b981', bg: 'rgb(236, 253, 245)' },
+    { icon: '🌐', num: fmtK(stats.links), label: '收录网址', sc: '#1e80ff', bg: 'rgb(232, 243, 255)' },
+    { icon: '📝', num: fmtK(stats.articles), label: '收录文章', sc: '#2f8bff', bg: 'rgb(234, 244, 255)' },
+    { icon: '💬', num: fmtK(stats.comments), label: '评论总数', sc: '#f59e0b', bg: 'rgb(255, 251, 235)' },
+    { icon: '👁️', num: fmtK(stats.totalViews), label: '总浏览', sc: '#10b981', bg: 'rgb(236, 253, 245)' },
   ]
   return (
     <aside className="home-sidebar">
@@ -81,7 +86,7 @@ export function HomeRail() {
 
       <RailCard title="🆕 最新收录">
         <div className="refreshing-list new-links-list">
-          {NEW_LINKS.map((l) => (
+          {newLinks.map((l) => (
             <Link key={l.id} href={`/link/${l.id}`} target="_blank" rel="noreferrer" className="recent-item">
               <span className="recent-dot"></span>
               <span className="side-logo-wrap">
@@ -100,7 +105,7 @@ export function HomeRail() {
 
       <RailCard title="📰 最新文章">
         <div className="refreshing-list">
-          {NEW_ARTICLES.map((a) => (
+          {newArticles.map((a) => (
             <Link key={a.id} href={`/articles/${a.id}`} className="recent-item">
               <span className="recent-dot"></span>
               <span style={{ flex: '1 1 0%', minWidth: 0 }}>
@@ -114,7 +119,7 @@ export function HomeRail() {
 
       <RailCard title="🕐 最近更新">
         <div className="refreshing-list recent-links-list">
-          {RECENT_LINKS.map((l) => (
+          {recentLinks.map((l) => (
             <Link key={l.id} href={`/link/${l.id}`} target="_blank" rel="noreferrer" className="recent-item">
               <span className="recent-dot"></span>
               <span className="side-logo-wrap">

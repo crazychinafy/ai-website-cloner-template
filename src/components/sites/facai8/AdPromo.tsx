@@ -1,11 +1,12 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
-import { HOME_ADS } from '@/lib/facai8/data/ads'
+import type { AdDto } from '@/lib/facai8/content/types'
 import { asset } from '@/lib/facai8/util'
 
 // 广告推广区块（14 条横幅，点击头部折叠/展开）
-export function AdPromo() {
+// P8-4：广告列表由服务端（页面 → 仓库）注入。
+export function AdPromo({ ads }: { ads: AdDto[] }) {
   const [collapsed, setCollapsed] = useState(false)
   return (
     <div
@@ -21,7 +22,7 @@ export function AdPromo() {
           <span style={{ fontSize: 14, fontWeight: 600, color: 'rgb(81, 87, 103)' }}>📢</span>
           <span style={{ fontSize: 13, fontWeight: 500, color: 'rgb(81, 87, 103)' }}>广告推广</span>
           <span style={{ fontSize: 11, color: 'rgb(194, 200, 209)', background: 'rgb(242, 243, 245)', padding: '2px 8px', borderRadius: 10 }}>
-            {HOME_ADS.length}条
+            {ads.length}条
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -33,7 +34,7 @@ export function AdPromo() {
         </div>
       </div>
       <div className="banner-list" style={{ padding: '12px 12px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {HOME_ADS.map((ad) => (
+        {ads.map((ad) => (
           <Link
             key={ad.id}
             href={ad.linkUrl}

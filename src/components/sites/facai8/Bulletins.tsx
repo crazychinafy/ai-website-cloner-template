@@ -1,17 +1,18 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { BULLETINS } from '@/lib/facai8/data/bulletins'
+import type { BulletinDto } from '@/lib/facai8/content/types'
 import { fmtDateMD } from '@/lib/facai8/util'
 
 // 顶部公告条（跑马灯：多条时 translateY 轮播）
-export function Bulletins() {
+// P8-4：公告列表由服务端（页面 → 仓库）注入，组件不再直读静态档案。
+export function Bulletins({ items }: { items: BulletinDto[] }) {
   const [idx, setIdx] = useState(0)
   useEffect(() => {
-    if (BULLETINS.length < 2) return
-    const t = setInterval(() => setIdx((i) => (i + 1) % BULLETINS.length), 4000)
+    if (items.length < 2) return
+    const t = setInterval(() => setIdx((i) => (i + 1) % items.length), 4000)
     return () => clearInterval(t)
-  }, [])
+  }, [items.length])
 
   return (
     <div className="bulletins">
@@ -24,7 +25,7 @@ export function Bulletins() {
       <span className="bulletin-label">公告</span>
       <div className="bulletin-marquee">
         <div className="bulletin-track" style={{ transform: `translateY(${-idx * 24}px)`, transition: 'transform .4s' }}>
-          {BULLETINS.map((b) => (
+          {items.map((b) => (
             <Link key={b.id} className="bulletin-item" href={`/bulletin/${b.id}`}>
               <span className="bulletin-item-title">{b.title}</span>
               <span className="bulletin-date">{fmtDateMD(b.createdAt)}</span>

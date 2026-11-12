@@ -21,7 +21,7 @@ import { eq } from "drizzle-orm"
 
 import { LINK_CATEGORIES } from "../../facai8/data/categories.ts"
 import { ALL_LINKS } from "../../facai8/data/links.ts"
-import { CAT_ORDER, applyLinkOrder } from "../../facai8/data/link-order.ts"
+import { CAT_ORDER, TAG_ORDER, applyLinkOrder } from "../../facai8/data/link-order.ts"
 import { LINK_DETAILS } from "../../facai8/data/link-details.ts"
 import { LINK_MIRRORS } from "../../facai8/data/link-mirrors.ts"
 import { TAGS } from "../../facai8/data/tags.ts"
@@ -444,9 +444,32 @@ type PageInsert = typeof sitePages.$inferInsert
 type IconInsert = typeof iconLibraries.$inferInsert
 type SettingInsert = typeof siteSettings.$inferInsert
 
+/**
+ * P8-0：标签页网格规范序 —— 每条带标签链接在其标签组内的稠密排名（0..n-1）。
+ * = applyLinkOrder(档案序按标签过滤, TAG_ORDER[tagId])，与前台标签页渲染序
+ * （static-repository.getLinksByTag）完全同构；导入与回填（backfill-tag-sort-order.ts）共用。
+ */
+export function computeTagSortRanks(): Map<string, number> {
+  const byTag = new Map<string, (typeof ALL_LINKS)[number][]>()
+  for (const l of ALL_LINKS) {
+    if (!l.tagId) continue
+    const arr = byTag.get(l.tagId) ?? []
+    arr.push(l)
+    byTag.set(l.tagId, arr)
+  }
+  const ranks = new Map<string, number>()
+  for (const [tagId, links] of byTag) {
+    const ordered = applyLinkOrder(links, TAG_ORDER[tagId])
+    for (let i = 0; i < ordered.length; i++) ranks.set(ordered[i].id, i)
+  }
+  return ranks
+}
+
 /** FK 依赖顺序的表插入（§8.4：分类→标签→链接→详情→镜像→文章→公告→广告→线路→页面→图标库→设置） */
 export async function insertAllContent(db: AppDb, s: StaticSnapshot, ts: string): Promise<Record<string, number>> {
   const counts: Record<string, number> = {}
+  // P8-0：标签页网格规范序 rank 表（tag_sort_order 列；快照/checksum 形态不变，插入期从冻结源计算）
+  const tagRank = computeTagSortRanks()
 
   const catRows: CatInsert[] = s.linkCategories.map((c) => ({
     id: BigInt(c.id),
@@ -493,7 +516,7 @@ export async function insertAllContent(db: AppDb, s: StaticSnapshot, ts: string)
   for (const c of chunk(tagRows, BATCH)) await db.insert(siteTags).values(c)
   counts.site_tags = tagRows.length
 
-  const linkRows: LinkInsert[] = s.siteLinks.map((l) => ({
+  const linkRows: LinkInsert[] = s.siteLinks.map((l, i) => ({
     id: BigInt(l.id),
     categoryId: BigInt(l.categoryId),
     tagId: l.tagId ? BigInt(l.tagId) : null,
@@ -504,6 +527,10 @@ export async function insertAllContent(db: AppDb, s: StaticSnapshot, ts: string)
     isGone: l.isGone,
     status: "published",
     sortOrder: l.sortOrder,
+    // P8-0：标签组内稠密排名（TAG_ORDER 序列 + 档案序追加）；无标签行保持 NULL
+    tagSortOrder: l.tagId ? (tagRank.get(l.id) ?? null) : null,
+    // P8：首页分组/搜索候选规范序 = 快照数组下标（快照已按源档案序排序且 checksum 冻结该序）
+    archiveSortOrder: i,
     sourceSnapshot: true,
     version: 1,
     createdAt: dbFromCanon(ts),
@@ -635,7 +662,9 @@ export async function insertAllContent(db: AppDb, s: StaticSnapshot, ts: string)
 
   const settingRows: SettingInsert[] = s.siteSettings.map((x) => ({
     settingKey: x.key,
-    settingValue: JSON.stringify(x.value),
+    // P8-0：直传 JS 值，由驱动对 json 列做一次 JSON 序列化（此前 JSON.stringify 预编码 → 落库双重编码，
+    // 与 P6D 后台写路径（干净 JSON）不一致；读取侧归一化见 content/mappers/settings-mapper）
+    settingValue: x.value,
     updatedBy: null,
     updatedAt: dbFromCanon(ts),
   }))

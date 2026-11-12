@@ -1,17 +1,19 @@
 import Link from 'next/link'
-import { SITE_INFO } from '@/lib/facai8/data/site-info'
+import { getContentRepository } from '@/lib/facai8/content/source'
 import { asset } from '@/lib/facai8/util'
 
-export function SiteFooter() {
+// P8-3：页脚站点信息改走统一内容仓库（server 组件）。
+export async function SiteFooter() {
+  const settings = await getContentRepository().getSiteSettings()
   return (
     <footer className="site-footer">
       <div className="footer-main">
         <div className="footer-brand">
           <div className="footer-brand-name">
-            <img alt="" className="footer-brand-logo" src={asset(SITE_INFO.siteLogo) || ''} />
-            <span>{SITE_INFO.siteName}</span>
+            <img alt="" className="footer-brand-logo" src={asset(settings.siteLogo) || ''} />
+            <span>{settings.siteName}</span>
           </div>
-          <p className="footer-desc">{SITE_INFO.siteDescription}</p>
+          <p className="footer-desc">{settings.siteDescription}</p>
         </div>
         <div className="footer-col">
           <div className="footer-col-title">关于</div>
@@ -22,7 +24,7 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="footer-bottom">
-        © 2026 {SITE_INFO.siteName} {SITE_INFO.footerText}
+        © 2026 {settings.siteName} {settings.footerText}
       </div>
     </footer>
   )

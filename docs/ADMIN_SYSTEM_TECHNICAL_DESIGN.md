@@ -277,7 +277,7 @@
 6. 回滚时只需将 CONTENT_SOURCE 改回 static 并重启服务；静态快照必须始终存在。
 7. 允许管理后台先独立运行和管理 MySQL，而前台仍保持 static 模式；这期间后台修改不会立即反映到前台，界面和文档必须明确提示当前数据源。
 
-### 5.2 读取层设计
+### 5.2 读取层设计（P8 已实施）
 
 先定义前台需要的稳定接口，例如：
 - getHomeCategories()
@@ -296,6 +296,8 @@
 由 source.ts 根据 CONTENT_SOURCE 选择 StaticSnapshotRepository 或 MySqlRepository。页面只调用读取接口，不直接 import MySQL client。
 
 第一阶段不改现有页面读取方式；等数据库导入和 Repository 测试通过后，再逐个迁移页面。每迁移一组页面，立即执行该组回归。
+
+**P8 实施结果**：接口固化为 `src/lib/facai8/content/repository.ts` 的 26 方法 `ContentRepository` 契约（上述接口全部在内，另含镜像、相关推荐、搜索、标签详情、图标库、站点页面、新链接/文章等）；`source.ts` 导出 `getContentRepository()` 进程内单例，调用链 = `React.cache(错误边界(真实仓库))`（P8-7 请求级去重 + P8-8 故障边界，见 §14）。全部前台页面/组件已迁移：`src/app` 与 `src/components` 对 `src/lib/facai8/data/*` 只剩 4 处 type-only 类型导入，无任何运行时数据依赖。
 
 ### 5.3 导入规则
 
@@ -625,6 +627,18 @@
 4. 是否需要运营人员多角色协作；如暂时只有一个管理员，仍保留 RBAC 结构但先只启用 super_admin。
 5. 是否要管理关于、用户协议、免责声明、隐私页面；建议放第二期。
 6. 是否要建立真正的会员、评论、收藏和投稿审核系统；这属于独立业务，不应混入第一期静态内容管理。
+
+## 14. P8 前台数据源实施记录（2026-11-12）
+
+P8（前台内容读取迁移到统一 Content Repository）已实施并通过验证，关键实现决策如下（完整交付报告：`docs/P8_FRONTEND_MIGRATION_REPORT.md`；平价证据：`docs/P8_DATA_PARITY_REPORT.md`；切换/回退：`docs/P8_ROLLBACK_RUNBOOK.md`）：
+
+- **目录结构**：`src/lib/facai8/content/` 下 `repository.ts`（26 方法契约 + 搜索封顶 `SEARCH_LINK_LIMIT=200`/`SEARCH_ARTICLE_LIMIT=100`）、`types.ts`（客户端安全 DTO）、`static-repository.ts` / `mysql-repository.ts`（双实现）、`rules.ts`（搜索匹配/相关推荐/摘要/可见性的共享纯函数，保证两源逐字符同规则）、`source.ts`（单例 + 去重 + 故障边界）、`errors.ts`（server-only `ContentSourceError`）。
+- **数据层补充迁移**：`0006`（settings 编码修复 + `site_links.tag_sort_order`）、`0007`（`site_links.archive_sort_order`）配合回填脚本，使 mysql 侧列表序与静态档案序/标签序恒等；迁移总数 tripwire 更新为 8。
+- **页面迁移**：54 条/页分页、URL、空态语义（公告缺失≠404、分类/标签缺失=页内「不存在」）全部保持；`Header`/`SiteFooter` 改服务端组件直读仓库，`Search`/`SubmitArticle` 等客户端组件纯 props 化；SEO `generateMetadata` 与页面同源。
+- **util 拆分**：`util.ts` 只留纯客户端安全函数；触达静态数据的函数原样复制为 `util-static-data.ts`（冻结平价预言机，仅服务端/测试引用），保证浏览器包不再被打入内容数据。
+- **渲染与缓存（P8-7 核查结论）**：未开 `cacheComponents`，build 路由清单确认前台全部路由为动态 `ƒ`，无构建期内容缓存；同一请求内 page/generateMetadata/layout 多次调用同一方法由 React `cache()` 门面去重（官方「Deduplicating requests」模式），去重作用域=单请求、失败 Promise 同请求共享；以 MySQL `performance_schema.events_statements_history_long` 采样取证。
+- **故障合同（P8-8）**：任一仓库方法抛错 → `ContentSourceError`（固定消息「内容数据服务暂时不可用（`<source>`），请求编号 `<32hex>`」，SQL/凭据只进服务端日志），HTTP 500 + Next 错误壳，hydration 后展示「服务暂时不可用」错误视图（`src/app/error.tsx` / `global-error.tsx`，Next 16 error boundary prop 为 `retry`）；绝不静默回退静态数据。Next 生产 SSR 不把服务端错误 message 序列化进 flight（仅 `digest`），32hex 编号经日志 `digest` 行关联排障。
+- **回归守卫**：`scripts/p8-dual-render-check.mjs`（双模 39 路径归一化 DOM 字节对比）、`scripts/p8-static-hash.mjs` + `docs/P8-static-baseline.json`（静态面冻结）、`scripts/p8-dedup-probe.mjs`（去重取证）。
 
 ---
 **实施入口：** 阅读 docs/ADMIN_SYSTEM_IMPLEMENTATION_PLAN.md，再按 docs/skills/admin-system-development/SKILL.md 的阶段执行。数据库 DDL 以 docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql 为准；安全和测试以 docs/ADMIN_SYSTEM_SECURITY_AND_TESTING.md 为准。

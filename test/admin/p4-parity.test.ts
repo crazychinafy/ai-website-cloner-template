@@ -125,13 +125,13 @@ describe("P4 Repository 一致性（static vs mysql）", () => {
     expect(await mysqlRepo.getNewArticles()).toEqual(await staticRepo.getNewArticles())
   })
 
-  it("标签链接（集合一致；顺序差异为已知限制 —— P2 单 sort_order 列）", async () => {
+  it("标签链接（P8-0 起集合+顺序都严格一致 —— site_links.tag_sort_order）", async () => {
     const tags = await staticRepo.getTags()
     expect(tags.length).toBe(5)
     for (const t of tags) {
-      const s = (await staticRepo.getLinksByTag(t.id)).map((l) => l.id).sort()
-      const m = (await mysqlRepo.getLinksByTag(t.id)).map((l) => l.id).sort()
-      expect(m, `tag ${t.id} 集合`).toEqual(s)
+      const s = (await staticRepo.getLinksByTag(t.id)).map((l) => l.id)
+      const m = (await mysqlRepo.getLinksByTag(t.id)).map((l) => l.id)
+      expect(m, `tag ${t.id} 序列`).toEqual(s)
     }
   })
 

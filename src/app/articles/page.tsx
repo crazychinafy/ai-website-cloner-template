@@ -1,13 +1,13 @@
-import { ARTICLE_CATEGORIES } from '@/lib/facai8/data/article-categories'
-import { ALL_ARTICLES } from '@/lib/facai8/data/articles'
-import { SITE_INFO } from '@/lib/facai8/data/site-info'
+import { getContentRepository } from '@/lib/facai8/content/source'
 import { getSessionUser } from '@/lib/facai8/auth'
 import { SiteFrame } from '@/components/sites/facai8/SiteFrame'
 import { ArticlesShell } from '@/components/sites/facai8/ArticlesShell'
 
-export const metadata = {
-  title: SITE_INFO.siteName,
-  description: SITE_INFO.siteDescription,
+// P8-3（第 3 组）：文章列表数据改走统一内容仓库（static/mysql 双源同构）
+
+export async function generateMetadata() {
+  const settings = await getContentRepository().getSiteSettings()
+  return { title: settings.siteName, description: settings.siteDescription }
 }
 
 export default async function ArticlesPage({
@@ -16,20 +16,19 @@ export default async function ArticlesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const sp = await searchParams
-  const user = await getSessionUser()
+  const repo = getContentRepository()
+  const [cats, user] = await Promise.all([repo.getArticleCategories(), getSessionUser()])
 
   // 源站：无 category 参数时默认第一个分类（黑平台曝光），URL 保持不变
   const catId = typeof sp.category === 'string' ? sp.category : ''
-  const active = ARTICLE_CATEGORIES.find((c) => c.id === catId) ?? ARTICLE_CATEGORIES[0]
+  const active = cats.find((c) => c.id === catId) ?? cats[0]
 
-  // 源站列表按创建时间倒序（API content 顺序）
-  const articles = ALL_ARTICLES.filter((a) => a.categoryId === active.id).sort((a, b) =>
-    a.createdAt === b.createdAt ? b.id.localeCompare(a.id) : b.createdAt.localeCompare(a.createdAt)
-  )
+  // 源站列表按创建时间倒序（repo.getArticles 契约序：createdAt 降序、id 降序）
+  const articles = await repo.getArticles({ categoryId: active.id })
 
   return (
     <SiteFrame user={user} barVariant="articles">
-      <ArticlesShell cats={ARTICLE_CATEGORIES} activeId={active.id} articles={articles} />
+      <ArticlesShell cats={cats} activeId={active.id} articles={articles} />
     </SiteFrame>
   )
 }

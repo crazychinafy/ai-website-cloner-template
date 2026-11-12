@@ -2,35 +2,23 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import type { Article } from '@/lib/facai8/data/articles'
-import type { LinkItem } from '@/lib/facai8/data/links'
-import type { Ad } from '@/lib/facai8/data/ads'
+import type { AdDto, ArticleDto, LinkItemDto } from '@/lib/facai8/content/types'
 import type { SessionUser } from '@/lib/facai8/auth'
-import { LINK_CATEGORIES } from '@/lib/facai8/data/categories'
-import { LINK_DETAILS } from '@/lib/facai8/data/link-details'
 import { asset, firstChar, fmtDate, fmtDateCn, gstaticFavicon, localHtml } from '@/lib/facai8/util'
 
-// 分类 id → 名称（相关网址徽章用）
-const CAT_NAME: Record<string, string> = (() => {
-  const m: Record<string, string> = {}
-  for (const c of LINK_CATEGORIES) {
-    m[c.id] = c.name
-    for (const sub of c.children) m[sub.id] = sub.name
-  }
-  return m
-})()
+// P8-3（第 3 组）：旧组件级 CAT_NAME/REL_DATE 数据映射（LINK_CATEGORIES/LINK_DETAILS 值导入）
+// 已废除 —— 分类名与详情日期由页面层从内容仓库取出后随 related 注入（见 app/articles/[id]/page.tsx）。
 
-// 相关网址日期（link-details 存档中有的才显示）
-const REL_DATE: Record<string, string> = (() => {
-  const m: Record<string, string> = {}
-  for (const l of Object.values(LINK_DETAILS)) m[l.id] = fmtDate(l.createdAt)
-  return m
-})()
+/** 相关网址条目：链接 DTO + 展示补充（categoryName 恒有值或空串；detailCreatedAt null = 源站无档不显示日期） */
+export interface RelatedLinkView extends LinkItemDto {
+  categoryName: string
+  detailCreatedAt: string | null
+}
 
 interface Props {
-  article: Article
-  related: LinkItem[]
-  ads: Ad[]
+  article: ArticleDto
+  related: RelatedLinkView[]
+  ads: AdDto[]
   user: SessionUser | null
 }
 
@@ -234,7 +222,7 @@ export function ArticleDetail({ article, related, ads, user }: Props) {
                     <div className="rel-article-list">
                       {related.map((l) => {
                         const logo = l.logoUrl ? asset(l.logoUrl) || gstaticFavicon(l.url) : gstaticFavicon(l.url)
-                        const catName = CAT_NAME[l.categoryId] || ''
+                        const catName = l.categoryName
                         return (
                           <a
                             key={l.id}
@@ -295,9 +283,9 @@ export function ArticleDetail({ article, related, ads, user }: Props) {
                                     {catName}
                                   </span>
                                 )}
-                                {REL_DATE[l.id] && (
+                                {l.detailCreatedAt && (
                                   <span style={{ fontSize: 11, color: '#999', flexShrink: 0, marginLeft: 'auto' }}>
-                                    {REL_DATE[l.id]}
+                                    {fmtDate(l.detailCreatedAt)}
                                   </span>
                                 )}
                               </div>

@@ -1,8 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { ArticleCategory } from '@/lib/facai8/data/article-categories'
-import type { Article } from '@/lib/facai8/data/articles'
+import type { ArticleCategoryDto, ArticleDto } from '@/lib/facai8/content/types'
 import type { CatNode } from '@/lib/facai8/data/categories'
 import { SideNav } from './SideNav'
 import { ArtCard, ArticlesPager } from './ArtCard'
@@ -11,9 +10,9 @@ import { MobileCatDrawer } from './MobileBar'
 const PAGE_SIZE = 18
 
 interface Props {
-  cats: ArticleCategory[]
+  cats: ArticleCategoryDto[]
   activeId: string
-  articles: Article[]
+  articles: ArticleDto[]
 }
 
 // 文章列表页：左栏「文章分类」+ 3 列卡片网格 + 分页（源站分页纯客户端状态）
@@ -54,7 +53,7 @@ function ArticlesGrid({
   onOtherCats,
 }: {
   activeName: string
-  articles: Article[]
+  articles: ArticleDto[]
   onOtherCats: () => void
 }) {
   const [page, setPage] = useState(1)

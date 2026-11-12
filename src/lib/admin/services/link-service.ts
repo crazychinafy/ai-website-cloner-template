@@ -131,6 +131,8 @@ export async function createLink(
 ): Promise<{ data: LinkAggregateDto }> {
   await assertRefsExist(asExecutor(db), input.categoryId, input.tagId ?? null)
   const sortOrder = input.sortOrder ?? (await linkRepo.maxSortOrderAll(asExecutor(db))) + 1
+  // P8-0：带标签新建 → 组内稠密排名尾部追加（max+1；空组 = 0）；无标签 = NULL
+  const tagSortOrder = input.tagId ? (await linkRepo.maxTagSortOrderInGroup(asExecutor(db), input.tagId)) + 1 : null
 
   return db.transaction(async (tx) => {
     const id = await linkRepo.insertLink(tx, {
@@ -141,6 +143,7 @@ export async function createLink(
       categoryId: input.categoryId,
       tagId: input.tagId ?? null,
       sortOrder,
+      tagSortOrder,
     })
 
     if (input.detail) {
@@ -166,6 +169,7 @@ export async function createLink(
       tagId: after.tagId,
       status: after.status,
       sortOrder: after.sortOrder,
+      tagSortOrder: after.tagSortOrder,
     }
     if (input.detail) afterData.detail = { fields: detailFieldNames(input.detail) }
     if (input.mirrors) afterData.mirrorCount = input.mirrors.length
@@ -205,6 +209,11 @@ export async function updateLink(
     if (input.categoryId !== undefined) patch.categoryId = input.categoryId
     if (input.tagId !== undefined) patch.tagId = input.tagId
     if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder
+    // P8-0：标签变更 → 重算组内稠密排名（改标签 = 新组 max+1 尾追；清除标签 = NULL；标签未变不动该列）
+    if (input.tagId !== undefined && input.tagId !== locked.tagId) {
+      patch.tagSortOrder =
+        input.tagId === null ? null : (await linkRepo.maxTagSortOrderInGroup(asExecutor(tx), input.tagId)) + 1
+    }
 
     // 备用链接全量替换：先校验归属再动笔（任一非法 ID → 整笔 409，无半态）
     let existingMirrors: LinkMirrorDto[] = []
@@ -273,6 +282,10 @@ export async function updateLink(
     if (input.sortOrder !== undefined) {
       before.sortOrder = locked.sortOrder
       after.sortOrder = input.sortOrder
+    }
+    if (patch.tagSortOrder !== undefined) {
+      before.tagSortOrder = locked.tagSortOrder
+      after.tagSortOrder = patch.tagSortOrder
     }
     if (input.detail === null) after.detail = null
     else if (input.detail) after.detail = { fields: detailFieldNames(input.detail) }

@@ -33,6 +33,13 @@ export const siteLinks = mysqlTable(
     isGone: boolean("is_gone").notNull().default(false),
     status: mysqlEnum("status", ["draft", "published", "disabled"]).notNull().default("published"),
     sortOrder: int("sort_order").notNull().default(0),
+    // P8-0：标签页网格规范序 —— 所属标签组内稠密排名（0..n-1，= TAG_ORDER 序列 + 档案序追加，
+    // 与分类页 sort_order 同构；tag_id 为 NULL 或未经导入/回填/后台维护的行可为 NULL → 标签页按 id 序附后）
+    tagSortOrder: int("tag_sort_order"),
+    // P8：首页分组 + 搜索候选规范序 = 源档案（ALL_LINKS 快照插入序）全局稠密下标（0..n-1）。
+    // 该序无法由 (sort_order,id) 复现（45/90 分类内档案序 ≠ 分类规范序），必须显式存储；
+    // 快照/checksum 形态不变，导入插入期按快照数组下标写入；后台新建行 NULL → 首页/搜索按 id 序附后
+    archiveSortOrder: int("archive_sort_order"),
     sourceSnapshot: boolean("source_snapshot").notNull().default(true),
     version: int("version", { unsigned: true }).notNull().default(1),
     createdAt: datetime("created_at", { mode: "string", fsp: 3 }).notNull().default(sql`CURRENT_TIMESTAMP(3)`),
@@ -44,6 +51,8 @@ export const siteLinks = mysqlTable(
   (t) => [
     index("idx_site_links_category_status_sort").on(t.categoryId, t.status, t.deletedAt, t.sortOrder),
     index("idx_site_links_tag_status").on(t.tagId, t.status, t.deletedAt),
+    // P8-0：标签页查询 (tag_id, status, deleted_at) 过滤后按 (tag_sort_order, id) 消费序直接走索引
+    index("idx_site_links_tag_sort").on(t.tagId, t.status, t.deletedAt, t.tagSortOrder, t.id),
     index("idx_site_links_updated").on(t.updatedAt),
   ],
 )
