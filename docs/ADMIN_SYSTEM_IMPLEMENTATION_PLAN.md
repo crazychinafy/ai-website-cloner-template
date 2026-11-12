@@ -259,13 +259,21 @@
 
 验收：/articles、/articles/[id]、/bulletin/[id] 回归 200；XSS payload 无法执行（`<script>`/`onclick`/`javascript:` 服务端剥离，预览即入库形态）。
 
-Gates：lint / typecheck / build 通过；`npm run test:admin` 34 文件 539 用例全绿（新增 `p6c-articles-api` 48、`p6c-bulletins-api` 38、`p6c-html-sanitizer` 40，真实 MySQL scratch 库 `facai8_p6c_test`）。
+Gates：lint / typecheck / build 通过；`npm run test:admin` 35 文件 558 用例全绿（`p6c-articles-api` 54、`p6c-bulletins-api` 40、`p6c-html-sanitizer` 41、`p6c-media-path` 10，真实 MySQL scratch 库 `facai8_p6c_test`；整改后复跑含 p6b 收紧断言仍全绿）。
 
 迁移 0004：`articles.id`、`bulletins.id` 转 BIGINT UNSIGNED AUTO_INCREMENT（雪花历史 ID 原样保留，无重建无清空）；开发库 `facai8_admin` 已应用，`docs/ADMIN_SYSTEM_DATABASE_SCHEMA.sql` 同步。
 
 RBAC：复用既有 `articles.*`/`bulletins.*` 权限码——editor 不可发布/删除/恢复（可排序，排序即 `*.update`），auditor 只读；API 层强制。
 
 静态冻结：`src/lib/facai8/data/` 20 文件与 P6B 基线提交逐字节一致（`git hash-object` 全比对）；前台页直接 import 静态模块，草稿永不泄漏到公开页。
+
+整改（验收反馈三问题，均已修复并补测试）：
+
+- [x] 问题 01 · 管理员端 DOM XSS（P1 安全）。`RichTextEditor` 挂载时把详情接口返回的库内原始 `contentHtml` 直接写入 `contentEditable`——历史未清洗正文（`onclick=`、`<script>` 等）会在编辑器内即时执行。修复：详情/列表 DTO 新增 `editorHtml` 字段（`dto/article.ts`、`dto/bulletin.ts`，Repository `to*Dto` 读路径内存净化 `sanitizeRichHtml(row.contentHtml)`，幂等、不改库、不批量重写存量）；`ArticleEditor`/`BulletinEditor` 的 `toForm`、`initialHtml`、保存后回灌、发布收敛同步四处一律消费 `editorHtml`；`contentHtml` 仍原样透出（前台渲染/审计对照）。`RichTextEditor` Props 写明「只接受服务端 Sanitizer 产物」安全契约。
+- [x] 问题 02 · 分类关联 TOCTOU（P1）。`createArticle` 的分类存在性检查在 `db.transaction` 之外，「检查通过 → 分类被并发软删除 → 照常插入」竞态（软删除不触发外键错误）；publish/restore 的分类检查是普通快照读。修复：`article-category-repository.ts` 新增 `lockArticleCategoryBriefForUpdate`（最小字段 + `SELECT ... FOR UPDATE`）；`assertCategoryUsable` 改为锁定读，create 的分类检查移入事务内，publish/restore 同改（要求分类 active 的发布闸门也在锁后判定）；锁序「先 articles 行后分类行」与既有约定一致，无反序死锁。测试：持锁事务实测阻塞并发 `UPDATE article_categories SET deleted_at`（锁释放前落地不可见）。
+- [x] 问题 03 · 媒体路径策略过宽（P1）。旧 `mediaPathSchema` 放行任意 `/` 开头路径（含未知后缀、`..`、查询串），`isSafeMediaSrc` 放行任意 http(s) 外链。修复：新建唯一策略源 `src/lib/admin/validation/media-path.ts`（isomorphic，客户端可 import）——站内 = 根前缀白名单（`/uploads/ /sites/ /images/ /videos/ /media/`）+ 已知图片/视频后缀 + 禁 `\`/控制字符/查询串/hash/`.`与`..`段/相对路径；站外 = 显式开关 `ALLOW_EXTERNAL_MEDIA = true`（策略明示：兼容 1 条历史绝对 Logo 与正文粘贴外链，仍过 `checkHttpUrl` 硬校验、服务端零远端抓取、前台 CSP 兜底）；`checkHttpUrl` 收敛至该模块（默认 label「地址」保持 p6b 文案不变）。`link-schema.mediaPathSchema`、封面/头像 schema、`html-sanitizer.isSafeMediaSrc`、`RichTextEditor.looksLikeSafeMediaSrc` 全部委托。文件存在性刻意不校验（快照引用未落盘的 `/uploads/**`，存在性盘点属 P6D 素材接入范围）。
+
+整改测试：`p6c-media-path.test.ts`（新增 10 用例）、`p6c-html-sanitizer.test.ts`（新增站内收紧用例）、`p6c-articles-api.test.ts`（新增 editorHtml 双字段/列表项、FOR UPDATE 阻塞并发软删除、封面 422 与历史形态放行 6 用例）、`p6c-bulletins-api.test.ts`（新增 editorHtml 2 用例）；既有 `p6b-links-schema.test.ts` 的 Logo 用例按新政策调整（裸 `/` 移入拒绝列表，新增站内未知后缀拒绝——原文件保留、其余断言不动）。
 
 > 开发库遗留（供验收复核）：`facai8_admin` 保留走查记录 `P6C走查_UI新建文章`（id `112450241390841857`，published v6，曾删除+恢复）与 `P6C走查_UI新建公告`（id `92981247277666305`，published v5，排序至 sort=0，曾删除+恢复）；走查引导账号 `smokeadmin` 密码已重置为 `P6c-Sm0ke-2026!`（`must_change_password=0`）；RBAC 补齐了早于 P6A 的种子所缺的 4 条 `article_categories.*` 权限及 4 角色映射（`INSERT IGNORE` 幂等补齐，与 `scripts/admin/seed-rbac.ts` 标准集一致）。
 

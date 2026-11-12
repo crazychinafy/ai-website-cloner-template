@@ -14,6 +14,12 @@ export interface ArticleDto {
   categoryName: string
   title: string
   contentHtml: string
+  /**
+   * 服务端 Sanitizer 就地净化出的「编辑器安全正文」（整改问题 01）：
+   * contentEditable 只接受本字段，杜绝历史未清洗 HTML 直接写入 DOM；
+   * contentHtml 仍是库内原文（前台渲染/审计对照用），读取不修改库。
+   */
+  editorHtml: string
   coverImage: string
   seoTitle: string
   seoKeywords: string

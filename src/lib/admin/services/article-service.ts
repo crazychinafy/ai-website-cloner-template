@@ -11,12 +11,15 @@
 //   历史未清洗正文（发布闸门）；published_at 只在首次发布写（repo COALESCE）
 // - 软删除/恢复：软删行对 update/status/delete 一律 404；恢复保留原状态，
 //   分类缺失 409 阻断；恢复「已发布」文章还要求分类仍启用（前台可见性一致）
+// - 分类关联（整改问题 02）：create/update/publish/restore 的分类状态检查一律在
+//   事务内 SELECT ... FOR UPDATE 锁定分类行后执行，杜绝「检查后分类被并发
+//   软删除/停用、外键仍放行」的 TOCTOU（软删除不触发外键错误）
 import "server-only"
 import { getDrizzle, type AdminDb } from "@/lib/db/client"
 import { writeAudit, type WriteCtx } from "../audit/audit-writer.ts"
 import { ContentError, versionConflict } from "../validation/content-error.ts"
 import { sanitizeRichHtml, htmlDigest } from "../security/html-sanitizer.ts"
-import { getArticleCategoryById } from "../repositories/article-category-repository.ts"
+import { lockArticleCategoryBriefForUpdate } from "../repositories/article-category-repository.ts"
 import * as repo from "../repositories/article-repository.ts"
 import { asExecutor, type Executor } from "../repositories/executor.ts"
 import type { ArticleDto, ArticlePreviewDto } from "../dto/article.ts"
@@ -62,9 +65,14 @@ function statusLabel(s: ArticleStatus): string {
   return s === "draft" ? "草稿" : s === "published" ? "已发布" : "已归档"
 }
 
-/** 分类关联校验：存在且未删除（编辑/新建允许停用分类——发布才要求 active） */
+/**
+ * 分类关联校验（锁定读；整改问题 02）：存在且未删除，并锁定分类行直到事务提交，
+ * 关闭「检查后 → 写入前」分类被并发软删除的 TOCTOU。
+ * （编辑/新建允许停用分类——发布/恢复才要求 active，见状态机处。）
+ * 必须在事务内调用。
+ */
 async function assertCategoryUsable(exec: Executor, categoryId: string): Promise<{ name: string }> {
-  const cat = await getArticleCategoryById(exec, categoryId)
+  const cat = await lockArticleCategoryBriefForUpdate(exec, categoryId)
   if (!cat || cat.deletedAt) throw catMissing()
   return { name: cat.name }
 }
@@ -95,10 +103,12 @@ export async function createArticle(
   input: CreateArticleInput,
   db: AdminDb = getDrizzle(),
 ): Promise<{ data: ArticleDto }> {
-  const cat = await assertCategoryUsable(asExecutor(db), input.categoryId)
   const contentHtml = sanitizeRichHtml(input.contentHtml ?? "")
 
   return db.transaction(async (tx) => {
+    // 整改问题 02：分类检查必须在事务内并 FOR UPDATE 锁分类行——事务外检查存在
+    // 「检查通过 → 分类被并发软删除 → 照常插入」竞态（软删除不触发外键错误）
+    const cat = await assertCategoryUsable(asExecutor(tx), input.categoryId)
     const id = await repo.insertArticle(tx, {
       categoryId: input.categoryId,
       title: input.title,
@@ -218,7 +228,8 @@ export async function changeArticleStatus(
     let sanitizedBody: string | undefined
     if (input.status === "published") {
       // 发布前置校验：分类存在未删且启用；正文净化后非空；历史未清洗正文顺带收敛
-      const cat = await getArticleCategoryById(asExecutor(tx), locked.categoryId.toString())
+      // （整改问题 02：锁定读分类行，与并发停用/软删除串行化）
+      const cat = await lockArticleCategoryBriefForUpdate(asExecutor(tx), locked.categoryId.toString())
       if (!cat || cat.deletedAt) throw catMissing()
       if (cat.status !== "active") throw catDisabled()
       const sanitized = sanitizeRichHtml(locked.contentHtml)
@@ -292,7 +303,8 @@ export async function restoreArticle(
     if (!locked.deletedAt) throw new ContentError(422, "VALIDATION_ERROR", "该文章未被删除，无需恢复")
     if (version !== locked.version) throw versionConflict()
 
-    const cat = await getArticleCategoryById(asExecutor(tx), locked.categoryId.toString())
+    // 整改问题 02：恢复同样锁定读分类行（分类被并发删除/停用时结果确定）
+    const cat = await lockArticleCategoryBriefForUpdate(asExecutor(tx), locked.categoryId.toString())
     if (!cat || cat.deletedAt) throw restoreBlocked("所属分类不存在或已被删除，无法恢复（请先处理分类）")
     if (locked.status === "published" && cat.status !== "active") {
       throw restoreBlocked("所属分类处于停用状态，恢复后文章将不可见，请先启用该分类")

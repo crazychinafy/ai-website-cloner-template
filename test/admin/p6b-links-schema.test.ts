@@ -69,12 +69,12 @@ describe("P6B URL 校验（httpUrlSchema）", () => {
 describe("P6B Logo/预览图路径（mediaPathSchema）", () => {
   const schema = mediaPathSchema("Logo", 1024)
   it("接受空串 / 站内 /uploads 路径 / http(s) 绝对链接（历史快照行）", () => {
-    for (const v of ["", "/uploads/2026/11/07/a.webp", "/", "https://cdn.example/logo.png", "http://cdn.example/logo.png"]) {
+    for (const v of ["", "/uploads/2026/11/07/a.webp", "https://cdn.example/logo.png", "http://cdn.example/logo.png"]) {
       expect(schema.safeParse(v).success, v).toBe(true)
     }
   })
-  it("拒绝协议相对 //、裸相对路径、反斜杠、危险 scheme", () => {
-    for (const v of ["//cdn.example/x", "uploads/x.png", "\\uploads\\x", "javascript:x", "data:image/png;base64,x", "ftp://x/y"]) {
+  it("拒绝协议相对 //、裸相对路径、反斜杠、危险 scheme（问题 03 收紧后：裸 / 与站内未知后缀同样拒绝）", () => {
+    for (const v of ["//cdn.example/x", "uploads/x.png", "\\uploads\\x", "javascript:x", "data:image/png;base64,x", "ftp://x/y", "/", "/uploads/x.php"]) {
       expect(schema.safeParse(v).success, v).toBe(false)
     }
   })

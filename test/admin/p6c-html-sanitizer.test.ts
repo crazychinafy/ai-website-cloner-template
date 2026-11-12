@@ -230,6 +230,22 @@ describe("isSafeMediaSrc", () => {
     }
   })
 
+  it("站内收紧（整改问题 03）：未知后缀 / 查询串 / 点段 / 相对路径拒绝", () => {
+    for (const v of [
+      "/uploads/a.php", // 未知后缀
+      "/uploads/x.svgz", // 后缀伪装
+      "/uploads/a.png?v=1", // 查询串（防 ?x=/uploads/.. 之类解析歧义）
+      "/uploads/a.png#frag", // hash
+      "/uploads/./a.png", // 单点段
+      "uploads/a.png", // 相对路径
+    ]) {
+      expect(isSafeMediaSrc(v), v).toBe(false)
+    }
+    // 站外策略（ALLOW_EXTERNAL_MEDIA=true）：仅硬 URL 校验，不要求图片后缀
+    expect(isSafeMediaSrc("https://cdn.example.com/a.php")).toBe(true)
+    expect(isSafeMediaSrc("https://user:pw@cdn.example.com/a.png")).toBe(false) // userinfo 拒绝
+  })
+
   it("控制字符拆词防护（squeeze 重组后判定）", () => {
     expect(isSafeMediaSrc("/upl\u0000oads/a.png")).toBe(true) // NUL 删除后仍是合法前缀
     expect(isSafeSiteHref("java\u0000script:alert(1)")).toBe(false) // 重组后 javascript: 被拒
